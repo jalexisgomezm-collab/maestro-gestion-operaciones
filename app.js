@@ -584,7 +584,7 @@ function tarjeta(a, urls, sub=''){
 }
 function miniFotos(list, urls, compId){
   const imgs = list.filter(esImg);
-  return `<div class="thumbs">${imgs.slice(0,3).map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" data-ver="${a.id}"><img src="${esc(urls[a.storage_path])}" alt="" loading="lazy"></a>` : '').join('')}${imgs.length>3?`<span class="more">+${imgs.length-3}</span>`:''}
+  return `<div class="thumbs">${imgs.slice(0,3).map(a => urls[a.storage_path] ? `<span class="th"><a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" data-ver="${a.id}"><img src="${esc(urls[a.storage_path])}" alt="" loading="lazy"></a><button type="button" class="th-del" title="Eliminar esta foto" data-rm="${a.id}">✕</button></span>` : '').join('')}${imgs.length>3?`<span class="more">+${imgs.length-3}</span>`:''}
     <button class="add-f" title="Agregar fotos" data-up="FOTO_EQUIPO" data-comp="${compId}">＋</button></div>`;
 }
 function pdfGuia(list, urls, guiaId){
@@ -594,24 +594,32 @@ function pdfGuia(list, urls, guiaId){
 function bindArchivos(T, A, urls, proyectoId, reload, proyecto = null){
   T.querySelectorAll('[data-up]').forEach(b => b.onclick = (e) => { e.stopPropagation(); subirArchivos({ proyectoId, categoria: b.dataset.up || null, componenteId: b.dataset.comp || null, guiaId: b.dataset.guia || null, accept: b.dataset.accept, proyecto }).then(ok => ok && reload()); });
   T.querySelectorAll('[data-rm]').forEach(b => b.onclick = async (e) => {
-    e.preventDefault(); const a = A.find(x => x.id === b.dataset.rm); if (!a) return;
+    e.preventDefault(); e.stopPropagation(); const a = A.find(x => x.id === b.dataset.rm); if (!a) return;
     if (!await confirmModal(`¿Eliminar "${a.nombre}"? No se puede recuperar.`)) return;
     const r1 = await sb.storage.from(BUCKET).remove([a.storage_path]); if (r1.error) return toast(r1.error.message);
     const r2 = await sb.from('proyecto_archivos').delete().eq('id', a.id); if (r2.error) return toast(r2.error.message);
     toast('Archivo eliminado'); reload();
   });
   const imgs = A.filter(a => esImg(a) && urls[a.storage_path]);
-  T.querySelectorAll('[data-ver]').forEach(el => el.onclick = (e) => { e.preventDefault(); visor(imgs, imgs.findIndex(a => a.id === el.dataset.ver), urls); });
+  const borrar = async (a) => {
+    if (!await confirmModal(`¿Eliminar la foto "${a.descripcion || a.nombre}"? No se puede recuperar.`)) return false;
+    const r1 = await sb.storage.from(BUCKET).remove([a.storage_path]); if (r1.error) { toast(r1.error.message); return false; }
+    const r2 = await sb.from('proyecto_archivos').delete().eq('id', a.id); if (r2.error) { toast(r2.error.message); return false; }
+    toast('Foto eliminada'); reload(); return true;
+  };
+  T.querySelectorAll('[data-ver]').forEach(el => el.onclick = (e) => { e.preventDefault(); visor(imgs, imgs.findIndex(a => a.id === el.dataset.ver), urls, borrar); });
 }
-function visor(imgs, i, urls){
+function visor(imgs, i, urls, borrar = null){
   if (i < 0) return;
   const draw = () => { const a = imgs[i];
     $modal.innerHTML = `<div class="ov visor"><div class="vbox"><img src="${esc(urls[a.storage_path])}" alt="">
-      <div class="vbar"><span>${esc(a.descripcion||a.nombre)} · ${i+1}/${imgs.length}</span><span class="row"><button class="sm" data-p>‹</button><button class="sm" data-n>›</button><a class="btn sm" href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">Abrir original</a><button class="sm" data-x>Cerrar</button></span></div></div></div>`;
+      <div class="vbar"><span>${esc(a.descripcion||a.nombre)} · ${i+1}/${imgs.length}</span><span class="row"><button class="sm" data-p>‹</button><button class="sm" data-n>›</button><a class="btn sm" href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">Abrir original</a>${borrar ? '<button class="sm danger" data-del>Eliminar foto</button>' : ''}<button class="sm" data-x>Cerrar</button></span></div></div></div>`;
     $modal.querySelector('[data-x]').onclick = () => { $modal.innerHTML=''; document.onkeydown=null; };
     $modal.querySelector('.ov').onclick = (e) => { if (e.target.classList.contains('ov')) { $modal.innerHTML=''; document.onkeydown=null; } };
     $modal.querySelector('[data-p]').onclick = () => { i = (i-1+imgs.length)%imgs.length; draw(); };
     $modal.querySelector('[data-n]').onclick = () => { i = (i+1)%imgs.length; draw(); };
+    const del = $modal.querySelector('[data-del]');
+    if (del) del.onclick = async () => { const a = imgs[i]; $modal.innerHTML = ''; document.onkeydown = null; await borrar(a); };
   };
   document.onkeydown = (e) => { if (!$modal.innerHTML) return; if (e.key==='Escape'){ $modal.innerHTML=''; document.onkeydown=null; } if (e.key==='ArrowRight'){ i=(i+1)%imgs.length; draw(); } if (e.key==='ArrowLeft'){ i=(i-1+imgs.length)%imgs.length; draw(); } };
   draw();
