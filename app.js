@@ -387,6 +387,7 @@ async function renderDetalle(id){
   const s = p.data, C = comp.data||[], G = guias.data||[], F = facts.data||[], O = ocs.data||[], S = sols.data||[], A = arch.data||[];
   const urls = await firmarUrls(A);
   const ge = G.filter(g=>g.tipo==='ENTRADA'), gs = G.filter(g=>g.tipo==='SALIDA');
+  const INF = A.filter(a => a.categoria === 'INFORME');
   const Fv = F.filter(f=>f.estado_cobro!=='ANULADA');
   const cobrado = Fv.length && Fv.every(f=>f.estado_cobro==='COBRADO');
   const steps = [
@@ -395,7 +396,7 @@ async function renderDetalle(id){
     ...(s.estado_comercial==='DEVUELTO' ? [['Devuelto', 'Equipo devuelto', 'dev']] : []),
     ['Ingreso (guía)', ge.map(g=>g.numero_guia).join(', '), ge.length>0],
     ['Requerimientos / OC', `${S.length} req · ${O.length} OC`, S.length+O.length>0],
-    ['Informe', s.numero_informe, !!s.numero_informe],
+    ['Informe', s.numero_informe || (INF.length ? `${INF.length} archivo(s)` : ''), !!s.numero_informe || INF.length > 0],
     ['Salida (guía)', gs.map(g=>g.numero_guia).join(', '), gs.length>0],
     ['Factura', Fv.map(f=>f.numero_factura).join(', '), Fv.length>0],
     ['Cobro', cobrado ? 'Cobrado' : (Fv.length ? 'Pendiente' : ''), cobrado],
@@ -404,7 +405,7 @@ async function renderDetalle(id){
   const esPI = s.clase === 'INTERNO';
   filtro.clase = esPI ? 'INTERNO' : 'SERVICIO';
   if (esPI && ['guias','facturas'].includes(tabActual)) tabActual = 'componentes';
-  const tabs = esPI ? [['componentes','Equipos / componentes',C.length],['requerimientos','Requerimientos',S.length],['ocs','Órdenes de compra',O.length],['archivos','Fotos y archivos',A.length]] : [['componentes','Componentes',C.length],['guias','Guías de remisión',G.length],['requerimientos','Requerimientos',S.length],['ocs','Órdenes de compra',O.length],['facturas','Facturación',F.length],['archivos','Fotos y archivos',A.length]];
+  const tabs = esPI ? [['componentes','Equipos / componentes',C.length],['requerimientos','Requerimientos',S.length],['ocs','Órdenes de compra',O.length],['informes','Informes',INF.length],['archivos','Fotos y archivos',A.length]] : [['componentes','Componentes',C.length],['guias','Guías de remisión',G.length],['requerimientos','Requerimientos',S.length],['ocs','Órdenes de compra',O.length],['informes','Informes técnicos',INF.length],['facturas','Facturación',F.length],['archivos','Fotos y archivos',A.length]];
 
   $app.querySelector('main').innerHTML = `
     <a class="back" href="#/">← ${esPI ? 'Proyectos internos' : 'Servicios a clientes'}</a>
@@ -418,7 +419,7 @@ async function renderDetalle(id){
       ${info('OC del cliente', s.numero_oc_cliente ? `<span class="mono">${esc(s.numero_oc_cliente)}</span> <span class="small">${fdate(s.fecha_oc_cliente)}</span>` : '—')}
       ${info('Cotización', linkOrText(s.numero_cotizacion, s.enlace_cotizacion))}
       ${s.numero_cotizacion ? '<div class="cot-panel" id="cot-panel"><div class="small">Cargando la cotización desde el cotizador…</div></div>' : ''}
-      ${info('Informe técnico', linkOrText(s.numero_informe, s.enlace_informe))}
+      ${info('Informe técnico', linkOrText(s.numero_informe, s.enlace_informe) + (INF.length ? `<div class="small" style="margin-top:2px">${INF.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${tipoDoc(a)}</a>` : '').join(' · ')} · <a href="#" data-tab-ir="informes">ver informes</a></div>` : ''))}
       ${info('Monto del servicio', money(s.monto_servicio, s.moneda))}
       ${info('Responsable', esc(s.responsable||'—'))}
       ${info('Inicio / entrega', `${fdate(s.fecha_inicio)} → ${fdate(s.fecha_entrega)}`)}
@@ -440,6 +441,7 @@ async function renderDetalle(id){
     if (error) toast(error.message); else { toast('Servicio eliminado'); location.hash = '#/'; }
   };
   $app.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { tabActual = b.dataset.t; renderDetalle(id); });
+  $app.querySelectorAll('[data-tab-ir]').forEach(a => a.onclick = (e) => { e.preventDefault(); tabActual = a.dataset.tabIr; renderDetalle(id); });
 
   const T = document.getElementById('tab');
   const reload = () => renderDetalle(id);
@@ -533,10 +535,23 @@ async function renderDetalle(id){
     };
   }
 
+  if (tabActual === 'informes') {
+    T.innerHTML = `<div class="sec-head"><div class="small">Informes técnicos del ${esPI ? 'proyecto' : 'servicio'} en PDF o Word (versiones, informe final, certificado de operatividad…).</div>
+      <button class="pri sm" data-up="INFORME" data-accept="${ACEPTA_INFORME}">+ Subir informe (PDF / Word)</button></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Tipo</th><th>Informe</th><th>Archivo</th><th>Subido</th><th>Tamaño</th><th></th></tr></thead><tbody>
+      ${INF.map(a => { const u = urls[a.storage_path]; return `<tr><td><span class="doc-tag ${esWord(a)?'w':'p'}">${tipoDoc(a)}</span></td>
+        <td>${esc(a.descripcion || '—')}</td><td class="small" style="max-width:280px;word-break:break-all">${esc(a.nombre)}</td>
+        <td>${fdate(a.created_at)}</td><td class="small">${a.tamano ? kb(a.tamano) : '—'}</td>
+        <td style="white-space:nowrap;text-align:right">${u ? (esWord(a) ? '' : `<a class="link-sm" href="${esc(u)}" target="_blank" rel="noopener">Ver</a> `) + `<a class="link-sm" href="${esc(u)}" download="${esc(a.nombre)}" target="_blank" rel="noopener">Descargar</a>` : ''} <button class="link sm danger" data-rm="${a.id}">Eliminar</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Aún no hay informes. Súbelos en PDF o Word con el botón de arriba.</td></tr>'}
+      </tbody></table></div>
+      ${s.numero_informe ? '' : '<div class="small" style="padding:8px 12px 12px">Consejo: escribe el N° de informe en la descripción al subirlo; si la OT aún no tiene N° de informe, se registra automáticamente.</div>'}`;
+    bindArchivos(T, A, urls, id, reload, s);
+  }
+
   if (tabActual === 'archivos') {
     const grupos = Object.entries(CATS).map(([k,l]) => [k, l, A.filter(a => a.categoria === k)]).filter(g => g[2].length);
     const etiqueta = (a) => { const c = C.find(x=>x.id===a.componente_id); const g = G.find(x=>x.id===a.guia_id); return c ? `Componente: ${c.descripcion}` : g ? `Guía ${g.numero_guia}` : ''; };
-    T.innerHTML = `<div class="sec-head"><div class="small">Fotos del equipo, PDF de guías, informes, OC del cliente y otros documentos del servicio.</div>
+    T.innerHTML = `<div class="sec-head"><div class="small">Fotos del equipo, PDF de guías, informes (PDF o Word), OC del cliente y otros documentos del servicio.</div>
       <button class="pri sm" data-up="">+ Subir fotos / archivos</button></div>
       <div style="padding:0 12px 14px">${grupos.map(([k,l,list]) => `<h3 class="cat-h">${esc(l)} <span class="cnt">${list.length}</span></h3>
         <div class="gal">${list.map(a => tarjeta(a, urls, etiqueta(a))).join('')}</div>`).join('') || '<div class="empty">Aún no hay fotos ni archivos. Súbelos con el botón de arriba (desde el celular puedes tomar la foto directamente).</div>'}</div>`;
@@ -548,6 +563,10 @@ async function renderDetalle(id){
 const BUCKET = 'maestro-archivos';
 const CATS = { FOTO_EQUIPO:'Fotos del equipo', GUIA:'Guías de remisión', INFORME:'Informes', COTIZACION:'Cotizaciones', OC_CLIENTE:'OC del cliente', FACTURA:'Facturas', OTRO:'Otros' };
 const esImg = (a) => (a.mime||'').startsWith('image/');
+const esWord = (a) => /msword|wordprocessingml/.test(a.mime || '') || /\.docx?$/i.test(a.nombre || '');
+const tipoDoc = (a) => esWord(a) ? 'WORD' : (a.mime || '').includes('pdf') ? 'PDF' : esImg(a) ? 'IMG' : 'ARCH';
+const ACEPTA_INFORME = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MIME_EXT = { pdf:'application/pdf', doc:'application/msword', docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', heic:'image/heic' };
 const kb = (n) => n > 1048576 ? (n/1048576).toFixed(1)+' MB' : Math.max(1, Math.round(n/1024))+' KB';
 async function firmarUrls(A){
   if (!A.length) return {};
@@ -556,7 +575,7 @@ async function firmarUrls(A){
 }
 function tarjeta(a, urls, sub=''){
   const u = urls[a.storage_path];
-  const prev = esImg(a) && u ? `<img src="${esc(u)}" alt="${esc(a.nombre)}" loading="lazy">` : `<div class="doc-ico">${(a.mime||'').includes('pdf')?'PDF':'ARCH'}</div>`;
+  const prev = esImg(a) && u ? `<img src="${esc(u)}" alt="${esc(a.nombre)}" loading="lazy">` : `<div class="doc-ico ${esWord(a)?'w':''}">${tipoDoc(a)}</div>`;
   return `<div class="card-f">
     <a class="prev" ${u?`href="${esc(u)}" target="_blank" rel="noopener"`:''} ${esImg(a)&&u?`data-ver="${a.id}"`:''}>${prev}</a>
     <div class="meta"><div class="nm" title="${esc(a.nombre)}">${esc(a.descripcion||a.nombre)}</div>
@@ -572,8 +591,8 @@ function pdfGuia(list, urls, guiaId){
   return list.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${esImg(a)?'Imagen':'PDF'}</a> <button class="link sm danger" data-rm="${a.id}" title="Eliminar archivo">✕</button><br>` : '').join('')
     + `<button class="link sm" data-up="GUIA" data-guia="${guiaId}" data-accept="application/pdf,image/*">${list.length?'+ otro':'Adjuntar PDF'}</button>`;
 }
-function bindArchivos(T, A, urls, proyectoId, reload){
-  T.querySelectorAll('[data-up]').forEach(b => b.onclick = (e) => { e.stopPropagation(); subirArchivos({ proyectoId, categoria: b.dataset.up || null, componenteId: b.dataset.comp || null, guiaId: b.dataset.guia || null, accept: b.dataset.accept }).then(ok => ok && reload()); });
+function bindArchivos(T, A, urls, proyectoId, reload, proyecto = null){
+  T.querySelectorAll('[data-up]').forEach(b => b.onclick = (e) => { e.stopPropagation(); subirArchivos({ proyectoId, categoria: b.dataset.up || null, componenteId: b.dataset.comp || null, guiaId: b.dataset.guia || null, accept: b.dataset.accept, proyecto }).then(ok => ok && reload()); });
   T.querySelectorAll('[data-rm]').forEach(b => b.onclick = async (e) => {
     e.preventDefault(); const a = A.find(x => x.id === b.dataset.rm); if (!a) return;
     if (!await confirmModal(`¿Eliminar "${a.nombre}"? No se puede recuperar.`)) return;
@@ -611,16 +630,17 @@ async function comprimir(file){
   } catch { return file; }
 }
 const limpiarNombre = (n) => n.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\w.\-]+/g,'_').slice(-80);
-function subirArchivos({ proyectoId, categoria, componenteId, guiaId, accept }){
+function subirArchivos({ proyectoId, categoria, componenteId, guiaId, accept, proyecto = null }){
   return new Promise(resolve => {
     const cat = categoria || 'FOTO_EQUIPO';
+    const esInforme = cat === 'INFORME' && !componenteId && !guiaId;
     $modal.innerHTML = `<div class="ov"><form class="modal" style="max-width:560px">
-      <header><h2>${guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
+      <header><h2>${guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
       <div class="body"><div class="fgrid">
-        <label class="f full"><span>Archivos (fotos o PDF, varios a la vez)</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,application/pdf')}" required></label>
-        ${componenteId || guiaId ? '' : `<label class="f"><span>Tipo</span><select name="cat">${Object.entries(CATS).map(([k,l])=>`<option value="${k}" ${k===cat?'selected':''}>${l}</option>`).join('')}</select></label>`}
-        <label class="f ${componenteId || guiaId ? 'full' : ''}"><span>Descripción (opcional)</span><input name="desc" placeholder="Ej. Estado de llegada, placa de datos…"></label>
-      </div><p class="small" style="margin-top:10px">Las fotos grandes se reducen automáticamente (máx. 1920 px). Límite: 25 MB por archivo.</p>
+        <label class="f full"><span>${esInforme ? 'Archivos del informe (PDF o Word, puedes subir ambos a la vez)' : 'Archivos (fotos, PDF o Word, varios a la vez)'}</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,' + ACEPTA_INFORME)}" required></label>
+        ${componenteId || guiaId || esInforme ? '' : `<label class="f"><span>Tipo</span><select name="cat">${Object.entries(CATS).map(([k,l])=>`<option value="${k}" ${k===cat?'selected':''}>${l}</option>`).join('')}</select></label>`}
+        <label class="f ${componenteId || guiaId || esInforme ? 'full' : ''}"><span>${esInforme ? 'N° de informe / descripción' : 'Descripción (opcional)'}</span><input name="desc" placeholder="${esInforme ? 'Ej. IT-2026-015 · Informe final' : 'Ej. Estado de llegada, placa de datos…'}"></label>
+      </div><p class="small" style="margin-top:10px">${esInforme ? 'Formatos: PDF, .doc o .docx. Límite: 25 MB por archivo.' : 'Las fotos grandes se reducen automáticamente (máx. 1920 px). Límite: 25 MB por archivo.'}</p>
       <div class="prog small"></div><div class="err" hidden></div></div>
       <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">Subir</button></footer></form></div>`;
     const form = $modal.querySelector('form');
@@ -633,13 +653,19 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, accept }){
       const prog = form.querySelector('.prog'); const errs = [];
       for (let k = 0; k < files.length; k++) {
         prog.textContent = `Subiendo ${k+1} de ${files.length}…`;
-        const f = await comprimir(files[k]);
+        let f = await comprimir(files[k]);
+        if (!f.type) { const ext = (f.name.split('.').pop() || '').toLowerCase(); if (MIME_EXT[ext]) f = new File([f], f.name, { type: MIME_EXT[ext] }); }
+        if (categoriaF === 'INFORME' && !/pdf|msword|wordprocessingml/.test(f.type)) { errs.push(`${f.name}: el informe debe ser PDF o Word (.doc / .docx)`); continue; }
         if (f.size > 25*1024*1024) { errs.push(`${f.name}: supera 25 MB`); continue; }
         const path = `${proyectoId}/${categoriaF.toLowerCase()}/${Date.now()}_${k}_${limpiarNombre(f.name)}`;
         const up = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
         if (up.error) { errs.push(`${f.name}: ${up.error.message}`); continue; }
         const ins = await sb.from('proyecto_archivos').insert({ proyecto_id: proyectoId, componente_id: componenteId, guia_id: guiaId, categoria: categoriaF, storage_path: path, nombre: f.name, mime: f.type, tamano: f.size, descripcion: val(form.desc.value.trim()), subido_por: session.user.id });
         if (ins.error) { await sb.storage.from(BUCKET).remove([path]); errs.push(`${f.name}: ${ins.error.message}`); }
+      }
+      // si la OT aún no tiene N° de informe, se toma el escrito al subir
+      if (categoriaF === 'INFORME' && proyecto && !proyecto.numero_informe && form.desc.value.trim()) {
+        await sb.from('proyectos').update({ numero_informe: form.desc.value.trim().split('·')[0].trim(), updated_at: new Date().toISOString() }).eq('id', proyectoId);
       }
       if (errs.length) { const el = form.querySelector('.err'); el.hidden = false; el.innerHTML = errs.map(esc).join('<br>'); prog.textContent=''; btn.disabled=false; btn.textContent='Cerrar'; btn.onclick = (ev) => { ev.preventDefault(); $modal.innerHTML=''; resolve(true); }; return; }
       $modal.innerHTML=''; toast(files.length > 1 ? `${files.length} archivos subidos` : 'Archivo subido'); resolve(true);
