@@ -501,11 +501,12 @@ async function renderDetalle(id){
     ];
     const hoy = new Date().toISOString().slice(0,10);
     T.innerHTML = `<div class="sec-head"><div class="small">Facturas emitidas al cliente por este servicio y si ya se cobraron.</div><button class="pri sm" data-add>+ Registrar factura</button></div>
-      <div class="tbl-wrap"><table><thead><tr><th>N° factura</th><th>Emisión</th><th>Vence</th><th style="text-align:right">Monto</th><th style="text-align:right">Cobrado</th><th>Estado</th><th>Fecha cobro</th><th></th></tr></thead><tbody>
+      <div class="tbl-wrap"><table><thead><tr><th>N° factura</th><th>Emisión</th><th>Vence</th><th style="text-align:right">Monto</th><th style="text-align:right">Cobrado</th><th>Estado</th><th>Fecha cobro</th><th>PDF / XML</th><th></th></tr></thead><tbody>
       ${F.map((f,i)=>{ const venc = f.fecha_vencimiento && f.fecha_vencimiento < hoy && (f.estado_cobro==='PENDIENTE'||f.estado_cobro==='PARCIAL');
-        return `<tr><td class="mono">${esc(f.numero_factura)}${f.observacion?`<div class="small">${esc(f.observacion)}</div>`:''}</td><td>${fdate(f.fecha_emision)}</td><td>${fdate(f.fecha_vencimiento)}${venc?' <span class="badge b-PENDIENTE">Vencida</span>':''}</td><td class="money">${money(f.monto,f.moneda)}</td><td class="money">${money(f.monto_cobrado,f.moneda)}</td><td>${badge(f.estado_cobro, EST_COBRO[f.estado_cobro])}${f.estado_cobro!=='COBRADO'&&f.estado_cobro!=='ANULADA'?` <button class="link sm" data-c="${i}">Marcar cobrada</button>`:''}</td><td>${fdate(f.fecha_cobro)}</td>${actions(i)}</tr>`; }).join('') || '<tr><td colspan="8" class="empty">Aún no se registra factura para este servicio.</td></tr>'}
+        return `<tr><td class="mono">${esc(f.numero_factura)}${f.observacion?`<div class="small">${esc(f.observacion)}</div>`:''}</td><td>${fdate(f.fecha_emision)}</td><td>${fdate(f.fecha_vencimiento)}${venc?' <span class="badge b-PENDIENTE">Vencida</span>':''}</td><td class="money">${money(f.monto,f.moneda)}</td><td class="money">${money(f.monto_cobrado,f.moneda)}</td><td>${badge(f.estado_cobro, EST_COBRO[f.estado_cobro])}${f.estado_cobro!=='COBRADO'&&f.estado_cobro!=='ANULADA'?` <button class="link sm" data-c="${i}">Marcar cobrada</button>`:''}</td><td>${fdate(f.fecha_cobro)}</td><td class="small" style="white-space:nowrap">${archFactura(A.filter(a=>a.factura_id===f.id), urls, f.id)}</td>${actions(i)}</tr>`; }).join('') || '<tr><td colspan="9" class="empty">Aún no se registra factura para este servicio.</td></tr>'}
       </tbody></table></div>`;
-    wire(F, 'proyecto_facturas', fields, 'factura');
+    wire(F, 'proyecto_facturas', fields, 'factura', {}, (r) => A.filter(a => a.factura_id === r.id));
+    bindArchivos(T, A, urls, id, reload);
     T.querySelectorAll('[data-c]').forEach(b => b.onclick = async () => { const f=F[b.dataset.c]; const {error}=await sb.from('proyecto_facturas').update({ estado_cobro:'COBRADO', monto_cobrado:f.monto, fecha_cobro: hoy }).eq('id', f.id); error?toast(error.message):(toast('Factura marcada como cobrada'),reload()); });
   }
 
@@ -552,7 +553,7 @@ async function renderDetalle(id){
 
   if (tabActual === 'archivos') {
     const grupos = Object.entries(CATS).map(([k,l]) => [k, l, A.filter(a => a.categoria === k)]).filter(g => g[2].length);
-    const etiqueta = (a) => { const c = C.find(x=>x.id===a.componente_id); const g = G.find(x=>x.id===a.guia_id); return c ? `Componente: ${c.descripcion}` : g ? `Guía ${g.numero_guia}` : ''; };
+    const etiqueta = (a) => { const c = C.find(x=>x.id===a.componente_id); const g = G.find(x=>x.id===a.guia_id); const fc = F.find(x=>x.id===a.factura_id); return c ? `Componente: ${c.descripcion}` : g ? `Guía ${g.numero_guia}` : fc ? `Factura ${fc.numero_factura}` : ''; };
     T.innerHTML = `<div class="sec-head"><div class="small">Fotos del equipo, PDF de guías, informes (PDF o Word), OC del cliente y otros documentos del servicio.</div>
       <button class="pri sm" data-up="">+ Subir fotos / archivos</button></div>
       <div style="padding:0 12px 14px">${grupos.map(([k,l,list]) => `<h3 class="cat-h">${esc(l)} <span class="cnt">${list.length}</span></h3>
@@ -566,10 +567,13 @@ const BUCKET = 'maestro-archivos';
 const CATS = { FOTO_EQUIPO:'Fotos del equipo', GUIA:'Guías de remisión', INFORME:'Informes', COTIZACION:'Cotizaciones', OC_CLIENTE:'OC del cliente', FACTURA:'Facturas', OTRO:'Otros' };
 const esImg = (a) => (a.mime||'').startsWith('image/');
 const esWord = (a) => /msword|wordprocessingml/.test(a.mime || '') || /\.docx?$/i.test(a.nombre || '');
-const tipoDoc = (a) => esWord(a) ? 'WORD' : (a.mime || '').includes('pdf') ? 'PDF' : esImg(a) ? 'IMG' : 'ARCH';
+const esXml = (a) => /xml/.test(a.mime || '') || /\.xml$/i.test(a.nombre || '');
+const esZip = (a) => /zip/.test(a.mime || '') || /\.zip$/i.test(a.nombre || '');
+const tipoDoc = (a) => esWord(a) ? 'WORD' : (a.mime || '').includes('pdf') ? 'PDF' : esXml(a) ? 'XML' : esZip(a) ? (/^r-|cdr/i.test(a.nombre||'') ? 'CDR' : 'ZIP') : esImg(a) ? 'IMG' : 'ARCH';
+const ACEPTA_FACTURA = '.pdf,.xml,.zip,application/pdf,application/xml,text/xml,application/zip,application/x-zip-compressed';
 const ACEPTA_OC = 'application/pdf,.pdf,image/*,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ACEPTA_INFORME = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const MIME_EXT = { pdf:'application/pdf', doc:'application/msword', docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', heic:'image/heic' };
+const MIME_EXT = { pdf:'application/pdf', doc:'application/msword', docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xml:'application/xml', zip:'application/zip', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', heic:'image/heic' };
 const kb = (n) => n > 1048576 ? (n/1048576).toFixed(1)+' MB' : Math.max(1, Math.round(n/1024))+' KB';
 async function firmarUrls(A){
   if (!A.length) return {};
@@ -594,8 +598,16 @@ function pdfGuia(list, urls, guiaId){
   return list.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${esImg(a)?'Imagen':'PDF'}</a> <button class="link sm danger" data-rm="${a.id}" title="Eliminar archivo">✕</button><br>` : '').join('')
     + `<button class="link sm" data-up="GUIA" data-guia="${guiaId}" data-accept="application/pdf,image/*">${list.length?'+ otro':'Adjuntar PDF'}</button>`;
 }
+function archFactura(list, urls, facturaId){
+  const orden = { PDF:0, XML:1, CDR:2 };
+  const l = [...list].sort((a,b) => (orden[tipoDoc(a)] ?? 9) - (orden[tipoDoc(b)] ?? 9));
+  const tiene = (t) => l.some(a => tipoDoc(a) === t);
+  const falta = !tiene('PDF') ? (!tiene('XML') ? 'PDF + XML' : 'PDF') : (!tiene('XML') ? 'XML' : '');
+  return l.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" ${tipoDoc(a)==='PDF' ? 'target="_blank" rel="noopener"' : `download="${esc(a.nombre)}"`} title="${esc(a.nombre)}">${tipoDoc(a)}</a><button type="button" class="link sm danger" data-rm="${a.id}" title="Quitar ${esc(a.nombre)}">✕</button>` : '').join(' ')
+    + ` <button type="button" class="link sm" data-up="FACTURA" data-fact="${facturaId}" data-accept="${ACEPTA_FACTURA}">${falta ? '📎 Adjuntar ' + falta : '+ otro'}</button>`;
+}
 function bindArchivos(T, A, urls, proyectoId, reload, proyecto = null){
-  T.querySelectorAll('[data-up]').forEach(b => b.onclick = (e) => { e.stopPropagation(); subirArchivos({ proyectoId, categoria: b.dataset.up || null, componenteId: b.dataset.comp || null, guiaId: b.dataset.guia || null, accept: b.dataset.accept, proyecto }).then(ok => ok && reload()); });
+  T.querySelectorAll('[data-up]').forEach(b => b.onclick = (e) => { e.stopPropagation(); subirArchivos({ proyectoId, categoria: b.dataset.up || null, componenteId: b.dataset.comp || null, guiaId: b.dataset.guia || null, facturaId: b.dataset.fact || null, accept: b.dataset.accept, proyecto }).then(ok => ok && reload()); });
   T.querySelectorAll('[data-rm]').forEach(b => b.onclick = async (e) => {
     e.preventDefault(); e.stopPropagation(); const a = A.find(x => x.id === b.dataset.rm); if (!a) return;
     if (!await confirmModal(`¿Eliminar "${a.nombre}"? No se puede recuperar.`)) return;
@@ -641,20 +653,20 @@ async function comprimir(file){
   } catch { return file; }
 }
 const limpiarNombre = (n) => n.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\w.\-]+/g,'_').slice(-80);
-function subirArchivos({ proyectoId, categoria, componenteId, guiaId, accept, proyecto = null }){
+function subirArchivos({ proyectoId, categoria, componenteId, guiaId, facturaId = null, accept, proyecto = null }){
   return new Promise(resolve => {
     const cat = categoria || 'FOTO_EQUIPO';
     const esInforme = cat === 'INFORME' && !componenteId && !guiaId;
     const esOC = cat === 'OC_CLIENTE' && !componenteId && !guiaId;
-    const fijo = componenteId || guiaId || esInforme || esOC;
+    const fijo = componenteId || guiaId || esInforme || esOC || facturaId;
     $modal.innerHTML = `<div class="ov"><form class="modal" style="max-width:560px">
-      <header><h2>${guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : esOC ? 'Adjuntar OC del cliente' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
+      <header><h2>${facturaId ? 'Adjuntar factura (PDF y XML)' : guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : esOC ? 'Adjuntar OC del cliente' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
       <div class="body"><div class="fgrid">
-        <label class="f full"><span>${esInforme ? 'Archivos del informe (PDF o Word, puedes subir ambos a la vez)' : esOC ? 'Archivo de la OC (PDF, foto o Word)' : 'Archivos (fotos, PDF o Word, varios a la vez)'}</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,' + ACEPTA_INFORME)}" required></label>
+        <label class="f full"><span>${facturaId ? 'Archivos de la factura: PDF y XML (selecciona ambos a la vez; también el CDR .zip si lo tienes)' : esInforme ? 'Archivos del informe (PDF o Word, puedes subir ambos a la vez)' : esOC ? 'Archivo de la OC (PDF, foto o Word)' : 'Archivos (fotos, PDF o Word, varios a la vez)'}</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,' + ACEPTA_INFORME)}" required></label>
         ${fijo ? '' : `<label class="f"><span>Tipo</span><select name="cat">${Object.entries(CATS).map(([k,l])=>`<option value="${k}" ${k===cat?'selected':''}>${l}</option>`).join('')}</select></label>`}
-        <label class="f ${fijo ? 'full' : ''}"><span>${esInforme ? 'N° de informe / descripción' : esOC ? 'N° de OC del cliente' : 'Descripción (opcional)'}</span><input name="desc" value="${esOC ? esc(proyecto?.numero_oc_cliente || '') : ''}" placeholder="${esInforme ? 'Ej. IT-2026-015 · Informe final' : esOC ? 'Ej. 4520004034' : 'Ej. Estado de llegada, placa de datos…'}"></label>
+        <label class="f ${fijo ? 'full' : ''}"><span>${facturaId ? 'Descripción (opcional)' : esInforme ? 'N° de informe / descripción' : esOC ? 'N° de OC del cliente' : 'Descripción (opcional)'}</span><input name="desc" value="${esOC ? esc(proyecto?.numero_oc_cliente || '') : ''}" placeholder="${facturaId ? 'Ej. Factura electrónica y XML enviados al cliente' : esInforme ? 'Ej. IT-2026-015 · Informe final' : esOC ? 'Ej. 4520004034' : 'Ej. Estado de llegada, placa de datos…'}"></label>
         ${esOC && !proyecto?.fecha_oc_cliente ? '<label class="f"><span>Fecha de la OC (opcional)</span><input type="date" name="focc"></label>' : ''}
-      </div><p class="small" style="margin-top:10px">${esInforme ? 'Formatos: PDF, .doc o .docx. Límite: 25 MB por archivo.' : esOC ? (proyecto?.numero_oc_cliente ? 'Formatos: PDF, foto o Word. Límite: 25 MB.' : 'Si escribes el N° de OC, se registra en la OT y queda como "Con OC cliente". Límite: 25 MB.') : 'Las fotos grandes se reducen automáticamente (máx. 1920 px). Límite: 25 MB por archivo.'}</p>
+      </div><p class="small" style="margin-top:10px">${facturaId ? 'Formatos: PDF, XML y ZIP (CDR de SUNAT). Límite: 25 MB por archivo.' : esInforme ? 'Formatos: PDF, .doc o .docx. Límite: 25 MB por archivo.' : esOC ? (proyecto?.numero_oc_cliente ? 'Formatos: PDF, foto o Word. Límite: 25 MB.' : 'Si escribes el N° de OC, se registra en la OT y queda como "Con OC cliente". Límite: 25 MB.') : 'Las fotos grandes se reducen automáticamente (máx. 1920 px). Límite: 25 MB por archivo.'}</p>
       <div class="prog small"></div><div class="err" hidden></div></div>
       <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">Subir</button></footer></form></div>`;
     const form = $modal.querySelector('form');
@@ -662,19 +674,21 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, accept, pr
     form.onsubmit = async (e) => {
       e.preventDefault();
       const files = [...form.f.files]; if (!files.length) return;
-      const categoriaF = guiaId ? 'GUIA' : (form.cat?.value || cat);
+      const categoriaF = guiaId ? 'GUIA' : facturaId ? 'FACTURA' : (form.cat?.value || cat);
       const btn = form.querySelector('[type=submit]'); btn.disabled = true;
       const prog = form.querySelector('.prog'); const errs = [];
       for (let k = 0; k < files.length; k++) {
         prog.textContent = `Subiendo ${k+1} de ${files.length}…`;
         let f = await comprimir(files[k]);
         if (!f.type) { const ext = (f.name.split('.').pop() || '').toLowerCase(); if (MIME_EXT[ext]) f = new File([f], f.name, { type: MIME_EXT[ext] }); }
+        if (f.type === 'text/xml') f = new File([f], f.name, { type: 'application/xml' });
+        if (facturaId && !/pdf|xml|zip/.test(f.type)) { errs.push(`${f.name}: la factura debe ser PDF, XML o ZIP (CDR)`); continue; }
         if (categoriaF === 'INFORME' && !/pdf|msword|wordprocessingml/.test(f.type)) { errs.push(`${f.name}: el informe debe ser PDF o Word (.doc / .docx)`); continue; }
         if (f.size > 25*1024*1024) { errs.push(`${f.name}: supera 25 MB`); continue; }
         const path = `${proyectoId}/${categoriaF.toLowerCase()}/${Date.now()}_${k}_${limpiarNombre(f.name)}`;
         const up = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
         if (up.error) { errs.push(`${f.name}: ${up.error.message}`); continue; }
-        const ins = await sb.from('proyecto_archivos').insert({ proyecto_id: proyectoId, componente_id: componenteId, guia_id: guiaId, categoria: categoriaF, storage_path: path, nombre: f.name, mime: f.type, tamano: f.size, descripcion: val(form.desc.value.trim()), subido_por: session.user.id });
+        const ins = await sb.from('proyecto_archivos').insert({ proyecto_id: proyectoId, componente_id: componenteId, guia_id: guiaId, factura_id: facturaId, categoria: categoriaF, storage_path: path, nombre: f.name, mime: f.type, tamano: f.size, descripcion: val(form.desc.value.trim()), subido_por: session.user.id });
         if (ins.error) { await sb.storage.from(BUCKET).remove([path]); errs.push(`${f.name}: ${ins.error.message}`); }
       }
       // si la OT aún no tiene N° de informe, se toma el escrito al subir
