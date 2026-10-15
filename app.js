@@ -388,11 +388,12 @@ async function renderDetalle(id){
   const urls = await firmarUrls(A);
   const ge = G.filter(g=>g.tipo==='ENTRADA'), gs = G.filter(g=>g.tipo==='SALIDA');
   const INF = A.filter(a => a.categoria === 'INFORME');
+  const OCC = A.filter(a => a.categoria === 'OC_CLIENTE');
   const Fv = F.filter(f=>f.estado_cobro!=='ANULADA');
   const cobrado = Fv.length && Fv.every(f=>f.estado_cobro==='COBRADO');
   const steps = [
     ['Cotización', s.numero_cotizacion, !!s.numero_cotizacion],
-    ['OC cliente', s.numero_oc_cliente ? 'OC '+s.numero_oc_cliente : (s.estado_comercial==='CON_OT'?'Sin OC · con OT':''), !!s.numero_oc_cliente || s.estado_comercial==='CON_OT'],
+    ['OC cliente', s.numero_oc_cliente ? 'OC '+s.numero_oc_cliente+(OCC.length?' 📎':'') : (OCC.length ? 'OC adjunta' : (s.estado_comercial==='CON_OT'?'Sin OC · con OT':'')), !!s.numero_oc_cliente || OCC.length>0 || s.estado_comercial==='CON_OT'],
     ...(s.estado_comercial==='DEVUELTO' ? [['Devuelto', 'Equipo devuelto', 'dev']] : []),
     ['Ingreso (guía)', ge.map(g=>g.numero_guia).join(', '), ge.length>0],
     ['Requerimientos / OC', `${S.length} req · ${O.length} OC`, S.length+O.length>0],
@@ -416,7 +417,7 @@ async function renderDetalle(id){
     </div>
     <div class="chain">${steps.map((st,i)=>`${i?'<span class="arr">→</span>':''}<div class="step ${st[2]==='dev'?'dev':st[2]?'done':''}"><b>${st[0]}</b>${esc(st[1]||'—')}</div>`).join('')}</div>
     <div class="grid-info">
-      ${info('OC del cliente', s.numero_oc_cliente ? `<span class="mono">${esc(s.numero_oc_cliente)}</span> <span class="small">${fdate(s.fecha_oc_cliente)}</span>` : '—')}
+      ${info('OC del cliente', (s.numero_oc_cliente ? `<span class="mono">${esc(s.numero_oc_cliente)}</span> <span class="small">${fdate(s.fecha_oc_cliente)}</span>` : '—') + `<div class="small occ" style="margin-top:2px">${OCC.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}">${tipoDoc(a)}</a><button type="button" class="link sm danger" data-rm="${a.id}" title="Quitar este archivo">✕</button>` : '').join(' · ')}${OCC.length ? ' · ' : ''}<button type="button" class="link sm" data-up="OC_CLIENTE" data-accept="${ACEPTA_OC}">${OCC.length ? '+ otro archivo' : '📎 Adjuntar OC'}</button></div>`)}
       ${info('Cotización', linkOrText(s.numero_cotizacion, s.enlace_cotizacion))}
       ${s.numero_cotizacion ? '<div class="cot-panel" id="cot-panel"><div class="small">Cargando la cotización desde el cotizador…</div></div>' : ''}
       ${info('Informe técnico', linkOrText(s.numero_informe, s.enlace_informe) + (INF.length ? `<div class="small" style="margin-top:2px">${INF.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${tipoDoc(a)}</a>` : '').join(' · ')} · <a href="#" data-tab-ir="informes">ver informes</a></div>` : ''))}
@@ -445,6 +446,7 @@ async function renderDetalle(id){
 
   const T = document.getElementById('tab');
   const reload = () => renderDetalle(id);
+  const gi = $app.querySelector('.grid-info'); if (gi && !esPI) bindArchivos(gi, OCC, urls, id, reload, s);
   const actions = (i) => `<td style="white-space:nowrap;text-align:right"><button class="link sm" data-e="${i}">Editar</button><button class="link sm danger" data-d="${i}">Quitar</button></td>`;
   const wire = (list, table, fields, title, fixed = {}, adjuntos = null) => {
     T.querySelectorAll('[data-e]').forEach(b => b.onclick = async () => { const r=list[b.dataset.e]; if (await formModal({ title:'Editar '+title, fields, data:r, onSave: async d => chk(await sb.from(table).update(d).eq('id', r.id)) })) reload(); });
@@ -565,6 +567,7 @@ const CATS = { FOTO_EQUIPO:'Fotos del equipo', GUIA:'Guías de remisión', INFOR
 const esImg = (a) => (a.mime||'').startsWith('image/');
 const esWord = (a) => /msword|wordprocessingml/.test(a.mime || '') || /\.docx?$/i.test(a.nombre || '');
 const tipoDoc = (a) => esWord(a) ? 'WORD' : (a.mime || '').includes('pdf') ? 'PDF' : esImg(a) ? 'IMG' : 'ARCH';
+const ACEPTA_OC = 'application/pdf,.pdf,image/*,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ACEPTA_INFORME = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const MIME_EXT = { pdf:'application/pdf', doc:'application/msword', docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', heic:'image/heic' };
 const kb = (n) => n > 1048576 ? (n/1048576).toFixed(1)+' MB' : Math.max(1, Math.round(n/1024))+' KB';
@@ -642,13 +645,16 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, accept, pr
   return new Promise(resolve => {
     const cat = categoria || 'FOTO_EQUIPO';
     const esInforme = cat === 'INFORME' && !componenteId && !guiaId;
+    const esOC = cat === 'OC_CLIENTE' && !componenteId && !guiaId;
+    const fijo = componenteId || guiaId || esInforme || esOC;
     $modal.innerHTML = `<div class="ov"><form class="modal" style="max-width:560px">
-      <header><h2>${guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
+      <header><h2>${guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : esOC ? 'Adjuntar OC del cliente' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
       <div class="body"><div class="fgrid">
-        <label class="f full"><span>${esInforme ? 'Archivos del informe (PDF o Word, puedes subir ambos a la vez)' : 'Archivos (fotos, PDF o Word, varios a la vez)'}</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,' + ACEPTA_INFORME)}" required></label>
-        ${componenteId || guiaId || esInforme ? '' : `<label class="f"><span>Tipo</span><select name="cat">${Object.entries(CATS).map(([k,l])=>`<option value="${k}" ${k===cat?'selected':''}>${l}</option>`).join('')}</select></label>`}
-        <label class="f ${componenteId || guiaId || esInforme ? 'full' : ''}"><span>${esInforme ? 'N° de informe / descripción' : 'Descripción (opcional)'}</span><input name="desc" placeholder="${esInforme ? 'Ej. IT-2026-015 · Informe final' : 'Ej. Estado de llegada, placa de datos…'}"></label>
-      </div><p class="small" style="margin-top:10px">${esInforme ? 'Formatos: PDF, .doc o .docx. Límite: 25 MB por archivo.' : 'Las fotos grandes se reducen automáticamente (máx. 1920 px). Límite: 25 MB por archivo.'}</p>
+        <label class="f full"><span>${esInforme ? 'Archivos del informe (PDF o Word, puedes subir ambos a la vez)' : esOC ? 'Archivo de la OC (PDF, foto o Word)' : 'Archivos (fotos, PDF o Word, varios a la vez)'}</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,' + ACEPTA_INFORME)}" required></label>
+        ${fijo ? '' : `<label class="f"><span>Tipo</span><select name="cat">${Object.entries(CATS).map(([k,l])=>`<option value="${k}" ${k===cat?'selected':''}>${l}</option>`).join('')}</select></label>`}
+        <label class="f ${fijo ? 'full' : ''}"><span>${esInforme ? 'N° de informe / descripción' : esOC ? 'N° de OC del cliente' : 'Descripción (opcional)'}</span><input name="desc" value="${esOC ? esc(proyecto?.numero_oc_cliente || '') : ''}" placeholder="${esInforme ? 'Ej. IT-2026-015 · Informe final' : esOC ? 'Ej. 4520004034' : 'Ej. Estado de llegada, placa de datos…'}"></label>
+        ${esOC && !proyecto?.fecha_oc_cliente ? '<label class="f"><span>Fecha de la OC (opcional)</span><input type="date" name="focc"></label>' : ''}
+      </div><p class="small" style="margin-top:10px">${esInforme ? 'Formatos: PDF, .doc o .docx. Límite: 25 MB por archivo.' : esOC ? (proyecto?.numero_oc_cliente ? 'Formatos: PDF, foto o Word. Límite: 25 MB.' : 'Si escribes el N° de OC, se registra en la OT y queda como "Con OC cliente". Límite: 25 MB.') : 'Las fotos grandes se reducen automáticamente (máx. 1920 px). Límite: 25 MB por archivo.'}</p>
       <div class="prog small"></div><div class="err" hidden></div></div>
       <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">Subir</button></footer></form></div>`;
     const form = $modal.querySelector('form');
@@ -672,6 +678,15 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, accept, pr
         if (ins.error) { await sb.storage.from(BUCKET).remove([path]); errs.push(`${f.name}: ${ins.error.message}`); }
       }
       // si la OT aún no tiene N° de informe, se toma el escrito al subir
+      // OC del cliente: si la OT no tiene N° de OC, se registra el escrito (y la fecha) y pasa a "Con OC cliente"
+      if (categoriaF === 'OC_CLIENTE' && proyecto && !proyecto.numero_oc_cliente && form.desc.value.trim()) {
+        const upd = { numero_oc_cliente: form.desc.value.trim(), updated_at: new Date().toISOString() };
+        if (proyecto.estado_comercial !== 'DEVUELTO') upd.estado_comercial = 'CON_OC';
+        if (form.focc?.value) upd.fecha_oc_cliente = form.focc.value;
+        await sb.from('proyectos').update(upd).eq('id', proyectoId);
+      } else if (categoriaF === 'OC_CLIENTE' && proyecto && !proyecto.fecha_oc_cliente && form.focc?.value) {
+        await sb.from('proyectos').update({ fecha_oc_cliente: form.focc.value, updated_at: new Date().toISOString() }).eq('id', proyectoId);
+      }
       if (categoriaF === 'INFORME' && proyecto && !proyecto.numero_informe && form.desc.value.trim()) {
         await sb.from('proyectos').update({ numero_informe: form.desc.value.trim().split('·')[0].trim(), updated_at: new Date().toISOString() }).eq('id', proyectoId);
       }
