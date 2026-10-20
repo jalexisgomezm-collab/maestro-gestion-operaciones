@@ -106,6 +106,20 @@ const tabla = (cab, filas, vacio) => filas.length
   ? `<table class="t"><thead><tr>${cab.map(([t, cl]) => `<th class="${cl || ''}">${esc(t)}</th>`).join('')}</tr></thead><tbody>${filas.join('')}</tbody></table>`
   : `<div class="vacio">${esc(vacio)}</div>`;
 
+/** Lista de informes técnicos de la OT: N° / título de cada uno (el PDF y el Word del mismo informe van juntos) */
+function informesTexto(s, INF) {
+  const tipo = (a) => /msword|wordprocessingml/.test(a.mime || '') || /\.docx?$/i.test(a.nombre || '') ? 'Word' : (a.mime || '').includes('pdf') || /\.pdf$/i.test(a.nombre || '') ? 'PDF' : 'archivo';
+  const grupos = new Map();
+  [...INF].sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || ''))).forEach(a => {
+    const titulo = String(a.descripcion || '').trim() || String(a.nombre || '').replace(/\.[^.]+$/, '');
+    const k = titulo.toLowerCase();
+    if (!grupos.has(k)) grupos.set(k, { titulo, tipos: new Set(), fecha: a.created_at });
+    grupos.get(k).tipos.add(tipo(a));
+  });
+  if (!grupos.size) return esc(s.numero_informe || '');
+  return `<div>${[...grupos.values()].map(g => `• <b style="color:#111">${esc(g.titulo)}</b> <span style="color:#555">(${[...g.tipos].join(', ')} · ${fdate(g.fecha)})</span>`).join('<br>')}</div>`;
+}
+
 // ------------------------------------------------------------------ ficha de una OT / PI
 /**
  * d = { s, C, G, F, O, S, INF, REF, OCC, cot, etiquetas:{EST_COM, EST_OP, EST_COBRO, TIPOS_PI}, fondo }
@@ -145,7 +159,7 @@ export async function fichaOT(d) {
       ${dato('Referencia cliente', esc(cot?.referencia || ''))}
       ${dato('OC del cliente', s.numero_oc_cliente ? `${esc(s.numero_oc_cliente)} · ${fdate(s.fecha_oc_cliente)}` : '—')}
       ${dato('Monto (sin IGV)', money(s.monto_servicio, mon))}
-      ${dato('Informe técnico', esc(s.numero_informe || (INF.length ? `${INF.length} archivo(s) adjunto(s)` : '')))}
+      ${dato('Informe técnico', informesTexto(s, INF), true)}
       ${dato('Condiciones', cot?.condiciones ? esc([cot.condiciones.forma_pago, cot.condiciones.plazo_entrega && `Plazo: ${cot.condiciones.plazo_entrega}`, cot.condiciones.garantia && `Garantía: ${cot.condiciones.garantia}`].filter(Boolean).join(' · ')) : '—')}</div>`);
 
   const fechas = esPI ? '' : caja('Fechas del servicio', `<div class="grid">
