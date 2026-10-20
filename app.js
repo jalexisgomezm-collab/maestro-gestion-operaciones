@@ -125,7 +125,7 @@ async function renderLista(){
   const rows = deClase.filter(p =>
     (filtro.verCerrados || p.estado === 'activo') &&
     (filtro.estado === 'TODOS' || p[campoEstado] === filtro.estado) &&
-    (!q || [p.nombre,p.cliente,p.responsable,p.numero_oc_cliente,p.numero_orden_trabajo,p.numero_cotizacion,p.numero_informe,p.descripcion].some(x => (x||'').toLowerCase().includes(q))));
+    (!q || [p.nombre,p.cliente,p.responsable,p.numero_oc_cliente,p.numero_orden_trabajo,p.numero_cotizacion,p.numero_informe,p.descripcion,p.referencia_cliente].some(x => (x||'').toLowerCase().includes(q))));
   const kpi = (k, n, l) => `<div class="kpi ${filtro.estado===k?'sel':''}" data-k="${k}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   const count = (campo, k) => activos.filter(p => p[campo] === k).length;
   const switcher = `<div class="seg"><button data-clase="SERVICIO" class="${!esPI?'on':''}">Servicios a clientes · OT <span class="cnt">${nSrv}</span></button><button data-clase="INTERNO" class="${esPI?'on':''}">Proyectos internos · PI <span class="cnt">${nPI}</span></button></div>`;
@@ -243,6 +243,7 @@ const SERV_FIELDS = [
   { k:'fecha_entrega', l:'Fecha de entrega', t:'date' },
   { sec:'Documentos vinculados' },
   { k:'numero_cotizacion', l:'N° Cotización', list:true, ph:'Elige de la lista del cotizador' },
+  { k:'referencia_cliente', l:'Referencia del cliente (licitación / SOLPED)', ph:'Ej. Licitación LP-2026-045 · SOLPED 1000234567', soloSiCol:true },
   { k:'enlace_cotizacion', l:'Enlace a la cotización (opcional)', ph:'https://…' },
   { k:'numero_informe', l:'N° Informe técnico' },
   { k:'enlace_informe', l:'Enlace al informe (opcional)', ph:'https://…' },
@@ -316,11 +317,19 @@ function aplicarCotizacion(form, q){
 }
 const NOMBRE_CAMPO = { cliente:'cliente', enlace_cotizacion:'PDF', nombre:'nombre', descripcion:'alcance', moneda:'moneda', monto_servicio:'monto' };
 
+// La columna proyectos.referencia_cliente puede no existir aún: el campo aparece solo cuando ya está creada.
+let colReferencia = null;
+async function hayColReferencia(){
+  if (colReferencia === null) { const r = await sb.from('proyectos').select('referencia_cliente').limit(1); colReferencia = !r.error; }
+  return colReferencia;
+}
+
 async function editarServicio(p){
   if ((p?.clase || filtro.clase) === 'INTERNO') return editarInterno(p);
+  const conRef = await hayColReferencia();
   const ot = p?.numero_orden_trabajo;
   const extra = `<div class="small" id="cotmsg" style="margin-top:10px">Cargando listas del cotizador…</div><div class="ot-box">${ot ? `Orden de trabajo: <b class="mono">${esc(ot)}</b> <span class="small">(asignada automáticamente, no se modifica)</span>` : `La <b>orden de trabajo</b> se asigna automáticamente al guardar (OT-${new Date().getFullYear()}-XXXX).`}</div>`;
-  const pr = formModal({ title: p ? `Editar servicio · ${ot||''}` : 'Nuevo servicio', fields: SERV_FIELDS, data: p, extra,
+  const pr = formModal({ title: p ? `Editar servicio · ${ot||''}` : 'Nuevo servicio', fields: SERV_FIELDS.filter(f => !f.soloSiCol || conRef), data: p, extra,
     onSave: async (d) => {
       if (d.numero_oc_cliente && d.estado_comercial !== 'DEVUELTO') d.estado_comercial = 'CON_OC';
       else if (d.estado_comercial === 'CON_OC') d.estado_comercial = 'PENDIENTE_OC';
@@ -361,6 +370,25 @@ async function editarInterno(p){
 }
 
 // Recuadro con la cotización leída en vivo del cotizador
+// Actividades de la cotización: resumen corto (títulos de cada bloque) + detalle completo plegable con deslizador
+function actividadesCot(lista){
+  const acts = (lista || []).map(a => String(typeof a === 'string' ? a : (a?.descripcion || a?.nombre || '')).trim()).filter(Boolean);
+  if (!acts.length) return '';
+  const esTitulo = (t) => /:\s*$/.test(t) && t === t.toUpperCase();
+  const titulos = acts.filter(esTitulo).map(t => t.replace(/:\s*$/, ''));
+  const n = acts.filter(t => !esTitulo(t)).length;
+  const resumen = titulos.length
+    ? titulos.map(t => `<span class="cot-chip">${esc(t)}</span>`).join('')
+    : acts.slice(0, 3).map(t => `<span class="cot-chip">${esc(t.length > 70 ? t.slice(0, 68) + '…' : t)}</span>`).join('') + (acts.length > 3 ? `<span class="small">+${acts.length - 3} más</span>` : '');
+  return `<div class="cot-acts">
+      <div class="k" style="margin-top:6px">Actividades cotizadas <span class="small">(${n} actividad${n === 1 ? '' : 'es'}${titulos.length ? ` en ${titulos.length} bloques` : ''})</span></div>
+      <div class="cot-resumen">${resumen}</div>
+      <details class="cot-det"><summary>Ver detalle completo</summary>
+        <ul class="cot-act">${acts.map(t => esTitulo(t) ? `<li class="tit">${esc(t)}</li>` : `<li>${esc(t)}</li>`).join('')}</ul>
+      </details>
+    </div>`;
+}
+
 async function panelCotizacion(s){
   const box = document.getElementById('cot-panel');
   if (!box) return;
@@ -386,7 +414,7 @@ async function panelCotizacion(s){
         ${fila('Garantía', esc(c.garantia || ''))}
         ${fila('Validez', esc(c.validez || ''))}
       </div>
-      ${q.actividades?.length ? `<div class="k" style="margin-top:6px">Actividades cotizadas</div><ul class="cot-act">${q.actividades.map(a => `<li>${esc(typeof a === 'string' ? a : (a?.descripcion || a?.nombre || ''))}</li>`).join('')}</ul>` : ''}
+      ${actividadesCot(q.actividades)}
       ${difMonto ? `<div class="small warn-txt">El monto registrado en esta OT (${money(s.monto_servicio, s.moneda)}) es distinto al subtotal cotizado (${money(q.subtotal, mon)}).</div>` : ''}`;
   } catch (e) {
     if (box.isConnected) box.innerHTML = `<div class="small">No se pudo leer el cotizador en este momento (${esc(e.message)}).</div>`;
@@ -442,6 +470,7 @@ async function renderDetalle(id){
     <div class="grid-info">
       ${info('OC del cliente', (s.numero_oc_cliente ? `<span class="mono">${esc(s.numero_oc_cliente)}</span> <span class="small">${fdate(s.fecha_oc_cliente)}</span>` : '—') + `<div class="small occ" style="margin-top:2px">${OCC.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}">${tipoDoc(a)}</a><button type="button" class="link sm danger" data-rm="${a.id}" title="Quitar este archivo">✕</button>` : '').join(' · ')}${OCC.length ? ' · ' : ''}<button type="button" class="link sm" data-up="OC_CLIENTE" data-accept="${ACEPTA_OC}">${OCC.length ? '+ otro archivo' : '📎 Adjuntar OC'}</button></div>`)}
       ${info('Cotización', linkOrText(s.numero_cotizacion, s.enlace_cotizacion))}
+      ${s.referencia_cliente ? info('Referencia del cliente', esc(s.referencia_cliente)) : ''}
       ${s.numero_cotizacion ? '<div class="cot-panel" id="cot-panel"><div class="small">Cargando la cotización desde el cotizador…</div></div>' : ''}
       ${info('Informe técnico', linkOrText(s.numero_informe, s.enlace_informe) + (INF.length ? `<div class="small" style="margin-top:2px">${INF.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${tipoDoc(a)}</a>` : '').join(' · ')} · <a href="#" data-tab-ir="informes">ver informes</a></div>` : ''))}
       ${info('Monto del servicio', money(s.monto_servicio, s.moneda))}
