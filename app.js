@@ -267,10 +267,13 @@ const PI_FIELDS = [
 // Listas del cotizador (solo lectura, en vivo): sirven para autocompletar el formulario.
 let cacheCot = null;
 async function listasCotizador(){
-  if (cacheCot && Date.now() - cacheCot.t < 5*60*1000) return cacheCot;
+  if (cacheCot && Date.now() - cacheCot.t < 60*1000) return cacheCot;
   const [c, q] = await Promise.all([sb.rpc('cotizador_clientes'), sb.rpc('cotizador_cotizaciones')]);
   if (c.error && q.error) throw new Error(c.error.message);
-  cacheCot = { t: Date.now(), clientes: c.data || [], cotizaciones: q.data || [] };
+  // el cotizador las entrega por fecha de modificación: se ordenan por N° (la más reciente primero)
+  const cotizaciones = [...(q.data || [])].sort((a, b) => String(b.numero || '').localeCompare(String(a.numero || ''), 'es', { numeric: true }));
+  const clientes = [...(c.data || [])].sort((a, b) => String(a.razon_social || '').localeCompare(String(b.razon_social || ''), 'es'));
+  cacheCot = { t: Date.now(), clientes, cotizaciones };
   return cacheCot;
 }
 const monedaCot = (sim) => /US|\$/.test(sim || '') && !/S\//.test(sim || '') ? 'DOLARES' : 'SOLES';
