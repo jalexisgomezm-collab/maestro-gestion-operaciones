@@ -1,4 +1,5 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { fichaOT, reporteGlobalPDF, reporteGlobalExcel } from '/reportes.js';
 
 const SUPABASE_URL = 'https://cbguxckfkaxytgzxvpxe.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_yx0C0-9u7_Z4FsfkFRPm8g__2FsSEf4';
@@ -101,6 +102,22 @@ function shell(inner){
 }
 function bindShell(){ const b=document.getElementById('logout'); if(b) b.onclick = () => sb.auth.signOut(); }
 
+// ---------- reportes ----------
+const ETIQUETAS = { EST_COM, EST_OP, EST_COBRO, TIPOS_PI };
+const FONDO = () => location.origin + '/membrete-gto.jpg';
+async function datosReporte(){
+  const [pr, fa, co, gu, oc, so] = await Promise.all([
+    sb.from('proyectos').select('*').order('numero_orden_trabajo', { ascending:true }),
+    sb.from('proyecto_facturas').select('proyecto_id,numero_factura,fecha_emision,fecha_vencimiento,monto,monto_cobrado,estado_cobro,moneda,fecha_cobro'),
+    sb.from('proyecto_componentes').select('proyecto_id'),
+    sb.from('proyecto_guias').select('proyecto_id,tipo,numero_guia,fecha'),
+    sb.from('ordenes_compra').select('proyecto_id,numero,total,moneda,estado').not('proyecto_id','is',null),
+    sb.from('solicitudes_pedido').select('proyecto_id').not('proyecto_id','is',null),
+  ]);
+  if (pr.error) throw new Error(pr.error.message);
+  return { P: pr.data || [], F: fa.data || [], C: co.data || [], G: gu.data || [], O: oc.data || [], S: so.data || [], etiquetas: ETIQUETAS, fondo: FONDO() };
+}
+
 // ---------- lista ----------
 async function renderLista(){
   $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
@@ -202,12 +219,25 @@ async function renderLista(){
         <select id="est"><option value="TODOS">Todos los estados</option>${Object.entries(estados).map(([k,l])=>`<option value="${k}" ${filtro.estado===k?'selected':''}>${l}</option>`).join('')}</select>
         <label class="small row" style="gap:6px"><input type="checkbox" id="cer" style="width:auto" ${filtro.verCerrados?'checked':''}> Ver finalizados / cancelados</label>
         <div style="flex:1"></div><span class="small">${rows.length} registro(s)</span>
+        <button class="sm" id="rep-pdf" title="Reporte global imprimible (PDF) con los registros del filtro actual">🖨 Reporte PDF</button>
+        <button class="sm" id="rep-xls" title="Reporte global en Excel: todos los servicios y proyectos, con facturas">⬇ Excel</button>
       </div>
       <div class="tbl-wrap"><table>
         <thead><tr>${thead}</tr></thead>
         <tbody>${filas || `<tr><td colspan="10" class="empty">No hay registros con este filtro. Crea el primero con el botón de arriba; el número (${esPI?'PI':'OT'}) se asigna solo.</td></tr>`}</tbody></table></div>
     </div>`;
   document.getElementById('nuevo').onclick = () => editarServicio(null);
+  document.getElementById('rep-pdf').onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try { const d = await datosReporte(); const ids = new Set(rows.map(r => r.id));
+      reporteGlobalPDF({ ...d, P: d.P.filter(p => ids.has(p.id)), clase: filtro.clase,
+        filtroTexto: [filtro.estado !== 'TODOS' ? `Estado: ${(estados[filtro.estado] || filtro.estado)}` : 'Todos los estados', filtro.verCerrados ? 'incluye finalizados/cancelados' : 'solo activos', filtro.q ? `búsqueda “${filtro.q}”` : ''].filter(Boolean).join(' · ') });
+    } catch (err) { toast(err.message); } finally { b.disabled = false; }
+  };
+  document.getElementById('rep-xls').onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true; const t = b.textContent; b.textContent = 'Generando…';
+    try { await reporteGlobalExcel(await datosReporte()); } catch (err) { toast(err.message); } finally { b.disabled = false; b.textContent = t; }
+  };
   $app.querySelectorAll('.seg [data-clase]').forEach(b => b.onclick = () => { if (filtro.clase !== b.dataset.clase) { filtro.clase = b.dataset.clase; filtro.estado = 'TODOS'; renderLista(); } });
   document.getElementById('q').oninput = (e) => { filtro.q = e.target.value; clearTimeout(window._qt); window._qt=setTimeout(()=>{ renderLista().then(()=>{ const i=document.getElementById('q'); i.focus(); i.setSelectionRange(i.value.length,i.value.length); }); },250); };
   document.getElementById('est').onchange = (e) => { filtro.estado = e.target.value; renderLista(); };
@@ -464,7 +494,7 @@ async function renderDetalle(id){
     ${esPI ? cabeceraPI(s, O, S, info) : `<div class="detail-head">
       <div><div class="ot-tag mono">${esc(s.numero_orden_trabajo||'')}</div><h1>${esc(s.nombre)}</h1><div class="sub">${esc(s.cliente||'Sin cliente')} · ${esc((s.tipo||'').toLowerCase())} ${s.estado!=='activo'?' · '+esc(s.estado):''}</div>
         <div class="row" style="margin-top:6px">${badge(s.estado_comercial, EST_COM[s.estado_comercial])} ${badge('op', EST_OP[s.estado_operativo])}</div></div>
-      <div class="row"><button id="edit">Editar datos</button><button class="danger" id="del">Eliminar</button></div>
+      <div class="row"><button id="ficha" title="Ficha de la OT para imprimir o guardar como PDF">🖨 Ficha PDF</button><button id="edit">Editar datos</button><button class="danger" id="del">Eliminar</button></div>
     </div>
     <div class="chain">${steps.map((st,i)=>`${i?'<span class="arr">→</span>':''}<div class="step ${st[2]==='dev'?'dev':st[2]?'done':''}"><b>${st[0]}</b>${esc(st[1]||'—')}</div>`).join('')}</div>
     <div class="grid-info">
@@ -487,6 +517,14 @@ async function renderDetalle(id){
       <div id="tab"></div>
     </div>`;
   document.getElementById('edit').onclick = () => editarServicio(s);
+  document.getElementById('ficha').onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try {
+      let cot = null;
+      if (!esPI && s.numero_cotizacion) { try { const { cotizaciones } = await listasCotizador(); cot = cotizaciones.find(x => x.numero === String(s.numero_cotizacion).trim()) || null; } catch {} }
+      fichaOT({ s, C, G, F, O, S, INF, cot, etiquetas: ETIQUETAS, fondo: FONDO() });
+    } finally { b.disabled = false; }
+  };
   if (!esPI && s.numero_cotizacion) panelCotizacion(s);
   document.getElementById('del').onclick = async () => {
     if (!await confirmModal('¿Eliminar este registro? Se borrarán sus componentes, guías, facturas, fotos y archivos. Las OC y requerimientos vinculados no se borran, solo se desvinculan.')) return;
@@ -774,7 +812,7 @@ function cabeceraPI(s, O, S, info){
   return `<div class="detail-head">
       <div><div class="ot-tag pi mono">${esc(s.numero_orden_trabajo||'')}</div><h1>${esc(s.nombre)}</h1><div class="sub">Proyecto interno · ${esc(TIPOS_PI[s.tipo] || s.tipo || '')}${s.estado!=='activo'?' · '+esc(s.estado):''}</div>
         <div class="row" style="margin-top:6px">${badge('pi', 'Interno')} ${badge('op', EST_OP[s.estado_operativo])}</div></div>
-      <div class="row"><button id="edit">Editar datos</button><button class="danger" id="del">Eliminar</button></div>
+      <div class="row"><button id="ficha" title="Ficha de la OT para imprimir o guardar como PDF">🖨 Ficha PDF</button><button id="edit">Editar datos</button><button class="danger" id="del">Eliminar</button></div>
     </div>
     <div class="kpis" style="margin-top:4px">
       <div class="kpi" style="cursor:default"><div class="n" style="font-size:18px">${s.presupuesto!=null ? money(s.presupuesto, mon) : '—'}</div><div class="l">Presupuesto</div></div>
