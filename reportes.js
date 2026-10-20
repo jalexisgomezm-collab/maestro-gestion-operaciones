@@ -229,7 +229,8 @@ export function filasGlobal(d) {
   });
 }
 
-export function reporteGlobalPDF(d) {
+export async function reporteGlobalPDF(d) {
+  const logo = await fondoIncrustado(d.logo);
   const filas = filasGlobal(d);
   const esPI = d.clase === 'INTERNO';
   const act = filas.filter(f => f.registro === 'activo');
@@ -237,7 +238,7 @@ export function reporteGlobalPDF(d) {
   const porCobrar = {}; filas.forEach(f => { if (f.porCobrar > 0.009) porCobrar[f.monedaFact] = (porCobrar[f.monedaFact] || 0) + f.porCobrar; });
   const monto = {}; act.forEach(f => { if (f.monto) monto[f.moneda] = (monto[f.moneda] || 0) + f.monto; });
   const comprasT = act.reduce((m, f) => { m.SOLES = (m.SOLES || 0) + f.comprasS; m.DOLARES = (m.DOLARES || 0) + f.comprasD; return m; }, {});
-  const cab = `<div class="cab"><div class="izq"><b style="font-size:12pt;color:#02934E">GTO PERU S.A.C.</b><br>Impreso: ${esc(hoyTexto())}${d.filtroTexto ? `<br>${esc(d.filtroTexto)}` : ''}</div>
+  const cab = `<div class="cab"><div class="izq">${logo ? `<img src="${esc(logo)}" alt="GTO" style="height:17mm;display:block;margin-bottom:2mm">` : '<b style="font-size:12pt;color:#02934E">GTO PERU S.A.C.</b><br>'}Impreso: ${esc(hoyTexto())}${d.filtroTexto ? `<br>${esc(d.filtroTexto)}` : ''}</div>
     <div class="der"><div class="titulo">${esPI ? 'REPORTE GLOBAL DE PROYECTOS INTERNOS' : 'REPORTE GLOBAL DE SERVICIOS'}</div>
     <div class="sub">${EMPRESA.nombre} · R.U.C. ${EMPRESA.ruc}</div><div class="num">${filas.length} registro${filas.length === 1 ? '' : 's'}</div></div></div>`;
   const kpis = esPI

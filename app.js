@@ -115,7 +115,7 @@ async function datosReporte(){
     sb.from('solicitudes_pedido').select('proyecto_id').not('proyecto_id','is',null),
   ]);
   if (pr.error) throw new Error(pr.error.message);
-  return { P: pr.data || [], F: fa.data || [], C: co.data || [], G: gu.data || [], O: oc.data || [], S: so.data || [], etiquetas: ETIQUETAS, fondo: FONDO() };
+  return { P: pr.data || [], F: fa.data || [], C: co.data || [], G: gu.data || [], O: oc.data || [], S: so.data || [], etiquetas: ETIQUETAS, fondo: FONDO(), logo: location.origin + '/logo-gto.png' };
 }
 
 // ---------- lista ----------
