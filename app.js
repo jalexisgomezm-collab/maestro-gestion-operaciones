@@ -432,6 +432,11 @@ async function renderDetalle(id){
   const s = p.data, C = comp.data||[], G = guias.data||[], F = facts.data||[], O = ocs.data||[], S = sols.data||[], A = arch.data||[];
   const urls = await firmarUrls(A);
   const ge = G.filter(g=>g.tipo==='ENTRADA'), gs = G.filter(g=>g.tipo==='SALIDA');
+  // fechas tomadas de las guías: primer ingreso y última salida
+  const porFecha = (l) => [...l].filter(g => g.fecha).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+  const gIng = porFecha(ge)[0] || null, gSal = porFecha(gs).slice(-1)[0] || null;
+  const diasEntre = (a, b) => Math.max(0, Math.round((new Date((b || new Date().toISOString().slice(0,10)) + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000));
+  const diasTaller = gIng ? diasEntre(String(gIng.fecha).slice(0,10), gSal ? String(gSal.fecha).slice(0,10) : null) : null;
   const INF = A.filter(a => a.categoria === 'INFORME');
   const OCC = A.filter(a => a.categoria === 'OC_CLIENTE');
   const REF = A.filter(esReferencia);
@@ -441,10 +446,10 @@ async function renderDetalle(id){
     ['Cotización', s.numero_cotizacion, !!s.numero_cotizacion],
     ['OC cliente', s.numero_oc_cliente ? 'OC '+s.numero_oc_cliente+(OCC.length?' 📎':'') : (OCC.length ? 'OC adjunta' : (s.estado_comercial==='CON_OT'?'Sin OC · con OT':'')), !!s.numero_oc_cliente || OCC.length>0 || s.estado_comercial==='CON_OT'],
     ...(s.estado_comercial==='DEVUELTO' ? [['Devuelto', 'Equipo devuelto', 'dev']] : []),
-    ['Ingreso (guía)', ge.map(g=>g.numero_guia).join(', '), ge.length>0],
+    ['Ingreso (guía)', ge.map(g=>g.numero_guia).join(', ') + (gIng ? ` · ${fdate(gIng.fecha)}` : ''), ge.length>0],
     ['Requerimientos / OC', `${S.length} req · ${O.length} OC`, S.length+O.length>0],
     ['Informe', s.numero_informe || (INF.length ? `${INF.length} archivo(s)` : ''), !!s.numero_informe || INF.length > 0],
-    ['Salida (guía)', gs.map(g=>g.numero_guia).join(', '), gs.length>0],
+    ['Salida (guía)', gs.map(g=>g.numero_guia).join(', ') + (gSal ? ` · ${fdate(gSal.fecha)}` : ''), gs.length>0],
     ['Factura', Fv.map(f=>f.numero_factura).join(', '), Fv.length>0],
     ['Cobro', cobrado ? 'Cobrado' : (Fv.length ? 'Pendiente' : ''), cobrado],
   ];
@@ -470,6 +475,9 @@ async function renderDetalle(id){
       ${info('Informe técnico', linkOrText(s.numero_informe, s.enlace_informe) + (INF.length ? `<div class="small" style="margin-top:2px">${INF.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${tipoDoc(a)}</a>` : '').join(' · ')} · <a href="#" data-tab-ir="informes">ver informes</a></div>` : ''))}
       ${info('Monto del servicio', money(s.monto_servicio, s.moneda))}
       ${info('Responsable', esc(s.responsable||'—'))}
+      ${info('Ingreso de componentes', gIng
+        ? `${fdate(gIng.fecha)} <div class="small">Guía ${esc(gIng.numero_guia)}${ge.length > 1 ? ` (+${ge.length - 1} guía${ge.length > 2 ? 's' : ''} más)` : ''} · ${gSal ? `salió el ${fdate(gSal.fecha)} (guía ${esc(gSal.numero_guia)}) · ${diasTaller} día${diasTaller === 1 ? '' : 's'} en taller` : `${diasTaller} día${diasTaller === 1 ? '' : 's'} en taller`}</div>`
+        : '<span class="small">Sin guía de entrada registrada</span>')}
       ${info('Inicio / entrega', `${fdate(s.fecha_inicio)} → ${fdate(s.fecha_entrega)}`)}
       ${info('Descripción', esc(s.descripcion||'—'))}
       ${s.observaciones ? info('Observaciones', esc(s.observaciones)) : ''}
@@ -511,8 +519,8 @@ async function renderDetalle(id){
       { k:'observacion', l:'Observación', full:true },
     ];
     T.innerHTML = `<div class="sec-head"><div class="small">Equipos o piezas que forman parte de este servicio.</div><button class="pri sm" data-add>+ Agregar componente</button></div>
-      <div class="tbl-wrap"><table><thead><tr><th>Fotos</th><th>Componente</th><th>Marca / Modelo</th><th>N° parte</th><th>N° serie</th><th>Cant.</th><th>Datos técnicos</th><th></th></tr></thead><tbody>
-      ${C.map((c,i)=>`<tr><td>${miniFotos(A.filter(a=>a.componente_id===c.id), urls, c.id)}</td><td>${esc(c.descripcion)}${c.observacion?`<div class="small">${esc(c.observacion)}</div>`:''}</td><td>${esc([c.marca,c.modelo].filter(Boolean).join(' / ')||'—')}</td><td class="mono">${esc(c.numero_parte||'—')}</td><td class="mono">${esc(c.numero_serie||'—')}</td><td class="mono">${esc(c.cantidad)}</td><td class="small" style="max-width:280px">${esc(c.datos_tecnicos||'—')}</td>${actions(i)}</tr>`).join('') || '<tr><td colspan="8" class="empty">Sin componentes registrados.</td></tr>'}
+      <div class="tbl-wrap"><table><thead><tr><th>Fotos</th><th>Componente</th><th>Marca / Modelo</th><th>N° parte</th><th>N° serie</th><th>Cant.</th><th>Ingreso</th><th>Datos técnicos</th><th></th></tr></thead><tbody>
+      ${C.map((c,i)=>`<tr><td>${miniFotos(A.filter(a=>a.componente_id===c.id), urls, c.id)}</td><td>${esc(c.descripcion)}${c.observacion?`<div class="small">${esc(c.observacion)}</div>`:''}</td><td>${esc([c.marca,c.modelo].filter(Boolean).join(' / ')||'—')}</td><td class="mono">${esc(c.numero_parte||'—')}</td><td class="mono">${esc(c.numero_serie||'—')}</td><td class="mono">${esc(c.cantidad)}</td><td class="small" style="white-space:nowrap">${gIng ? `${fdate(gIng.fecha)}<div>${esc(gIng.numero_guia)}</div>` : '—'}</td><td class="small" style="max-width:280px">${esc(c.datos_tecnicos||'—')}</td>${actions(i)}</tr>`).join('') || '<tr><td colspan="9" class="empty">Sin componentes registrados.</td></tr>'}
       </tbody></table></div>`;
     wire(C, 'proyecto_componentes', fields, 'componente', {}, (r) => A.filter(a => a.componente_id === r.id));
     bindArchivos(T, A, urls, id, reload);
