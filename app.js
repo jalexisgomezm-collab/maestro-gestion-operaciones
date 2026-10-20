@@ -268,13 +268,33 @@ const PI_FIELDS = [
 let cacheCot = null;
 async function listasCotizador(){
   if (cacheCot && Date.now() - cacheCot.t < 60*1000) return cacheCot;
-  const [c, q] = await Promise.all([sb.rpc('cotizador_clientes'), sb.rpc('cotizador_cotizaciones')]);
-  if (c.error && q.error) throw new Error(c.error.message);
-  // el cotizador las entrega por fecha de modificación: se ordenan por N° (la más reciente primero)
-  const cotizaciones = [...(q.data || [])].sort((a, b) => String(b.numero || '').localeCompare(String(a.numero || ''), 'es', { numeric: true }));
+  const [c, q, todas] = await Promise.all([sb.rpc('cotizador_clientes'), sb.rpc('cotizador_cotizaciones'), cotizacionesDirecto()]);
+  if (c.error && q.error && !todas) throw new Error(c.error.message);
+  // La función de la base solo recibe las 50 últimas modificadas; la API del cotizador entrega todas con ?limit.
+  // Se unen ambas (por N°) y se ordenan por N° (la más reciente primero).
+  const porNum = new Map((q.data || []).map(x => [x.numero, x]));
+  (todas || []).forEach(x => porNum.set(x.numero, { ...(porNum.get(x.numero) || {}), ...x }));
+  const cotizaciones = [...porNum.values()].sort((a, b) => String(b.numero || '').localeCompare(String(a.numero || ''), 'es', { numeric: true }));
   const clientes = [...(c.data || [])].sort((a, b) => String(a.razon_social || '').localeCompare(String(b.razon_social || ''), 'es'));
   cacheCot = { t: Date.now(), clientes, cotizaciones };
   return cacheCot;
+}
+// Lista completa directo de la API del cotizador (solo lectura), con el mismo formato que la función cotizador_cotizaciones()
+const API_COTIZADOR = 'https://backend-v2-production-dcbc.up.railway.app/api/cotizaciones?limit=1000';
+async function cotizacionesDirecto(){
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 12000);
+    const r = await fetch(API_COTIZADOR, { signal: ctl.signal }); clearTimeout(t);
+    if (!r.ok) return null;
+    const d = await r.json(); const l = Array.isArray(d) ? d : (d.data || []);
+    return l.filter(x => x && x.numero).map(x => ({
+      numero: x.numero, fecha: x.fecha_emision || null, vence: x.fecha_vencimiento || null, estado: x.estado || null,
+      referencia: x.referencia || null, cliente: x.clientes?.razon_social || null, cliente_ruc: x.clientes?.ruc || null,
+      moneda: x.moneda_simbolo || null, subtotal: x.subtotal ?? x.operacion_gravada ?? null, igv: x.igv ?? null, total: x.total ?? null,
+      actividades: (x.activities || []).map(a => typeof a === 'string' ? a : (a?.descripcion || a?.nombre || a?.texto || '')).filter(Boolean),
+      condiciones: x.condiciones || null, pdf_url: x.pdf_url || null,
+    }));
+  } catch { return null; }
 }
 const monedaCot = (sim) => /US|\$/.test(sim || '') && !/S\//.test(sim || '') ? 'DOLARES' : 'SOLES';
 const ESTADO_COT = { generada:'Generada', enviada:'Enviada', aprobada:'Aprobada', aceptada:'Aceptada', rechazada:'Rechazada', anulada:'Anulada', vencida:'Vencida' };
