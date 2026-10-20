@@ -125,7 +125,7 @@ async function renderLista(){
   const rows = deClase.filter(p =>
     (filtro.verCerrados || p.estado === 'activo') &&
     (filtro.estado === 'TODOS' || p[campoEstado] === filtro.estado) &&
-    (!q || [p.nombre,p.cliente,p.responsable,p.numero_oc_cliente,p.numero_orden_trabajo,p.numero_cotizacion,p.numero_informe,p.descripcion,p.referencia_cliente].some(x => (x||'').toLowerCase().includes(q))));
+    (!q || [p.nombre,p.cliente,p.responsable,p.numero_oc_cliente,p.numero_orden_trabajo,p.numero_cotizacion,p.numero_informe,p.descripcion].some(x => (x||'').toLowerCase().includes(q))));
   const kpi = (k, n, l) => `<div class="kpi ${filtro.estado===k?'sel':''}" data-k="${k}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   const count = (campo, k) => activos.filter(p => p[campo] === k).length;
   const switcher = `<div class="seg"><button data-clase="SERVICIO" class="${!esPI?'on':''}">Servicios a clientes · OT <span class="cnt">${nSrv}</span></button><button data-clase="INTERNO" class="${esPI?'on':''}">Proyectos internos · PI <span class="cnt">${nPI}</span></button></div>`;
@@ -243,7 +243,6 @@ const SERV_FIELDS = [
   { k:'fecha_entrega', l:'Fecha de entrega', t:'date' },
   { sec:'Documentos vinculados' },
   { k:'numero_cotizacion', l:'N° Cotización', list:true, ph:'Elige de la lista del cotizador' },
-  { k:'referencia_cliente', l:'Referencia del cliente (licitación / SOLPED)', ph:'Ej. Licitación LP-2026-045 · SOLPED 1000234567', soloSiCol:true },
   { k:'enlace_cotizacion', l:'Enlace a la cotización (opcional)', ph:'https://…' },
   { k:'numero_informe', l:'N° Informe técnico' },
   { k:'enlace_informe', l:'Enlace al informe (opcional)', ph:'https://…' },
@@ -317,19 +316,11 @@ function aplicarCotizacion(form, q){
 }
 const NOMBRE_CAMPO = { cliente:'cliente', enlace_cotizacion:'PDF', nombre:'nombre', descripcion:'alcance', moneda:'moneda', monto_servicio:'monto' };
 
-// La columna proyectos.referencia_cliente puede no existir aún: el campo aparece solo cuando ya está creada.
-let colReferencia = null;
-async function hayColReferencia(){
-  if (colReferencia === null) { const r = await sb.from('proyectos').select('referencia_cliente').limit(1); colReferencia = !r.error; }
-  return colReferencia;
-}
-
 async function editarServicio(p){
   if ((p?.clase || filtro.clase) === 'INTERNO') return editarInterno(p);
-  const conRef = await hayColReferencia();
   const ot = p?.numero_orden_trabajo;
   const extra = `<div class="small" id="cotmsg" style="margin-top:10px">Cargando listas del cotizador…</div><div class="ot-box">${ot ? `Orden de trabajo: <b class="mono">${esc(ot)}</b> <span class="small">(asignada automáticamente, no se modifica)</span>` : `La <b>orden de trabajo</b> se asigna automáticamente al guardar (OT-${new Date().getFullYear()}-XXXX).`}</div>`;
-  const pr = formModal({ title: p ? `Editar servicio · ${ot||''}` : 'Nuevo servicio', fields: SERV_FIELDS.filter(f => !f.soloSiCol || conRef), data: p, extra,
+  const pr = formModal({ title: p ? `Editar servicio · ${ot||''}` : 'Nuevo servicio', fields: SERV_FIELDS, data: p, extra,
     onSave: async (d) => {
       if (d.numero_oc_cliente && d.estado_comercial !== 'DEVUELTO') d.estado_comercial = 'CON_OC';
       else if (d.estado_comercial === 'CON_OC') d.estado_comercial = 'PENDIENTE_OC';
@@ -396,7 +387,9 @@ async function panelCotizacion(s){
     const { cotizaciones } = await listasCotizador();
     if (!box.isConnected) return;
     const q = cotizaciones.find(x => x.numero === String(s.numero_cotizacion).trim());
-    if (!q) { box.innerHTML = `<div class="small">La cotización <b class="mono">${esc(s.numero_cotizacion)}</b> no figura en el cotizador.</div>`; return; }
+    if (!q) { const rb = document.getElementById('ref-cot'); if (rb) rb.textContent = '—'; box.innerHTML = `<div class="small">La cotización <b class="mono">${esc(s.numero_cotizacion)}</b> no figura en el cotizador.</div>`; return; }
+    const refBox = document.getElementById('ref-cot');
+    if (refBox) refBox.innerHTML = q.referencia ? `${esc(q.referencia)} <span class="small">(del cotizador)</span>` : '<span class="small">Sin referencia en la cotización</span>';
     const mon = monedaCot(q.moneda), c = q.condiciones || {};
     const difMonto = s.monto_servicio != null && q.subtotal != null && Math.abs(Number(s.monto_servicio) - Number(q.subtotal)) > 0.01;
     const fila = (k, v) => v ? `<div><span class="k">${k}</span> ${v}</div>` : '';
@@ -413,6 +406,7 @@ async function panelCotizacion(s){
         ${fila('Plazo', esc(c.plazo_entrega || ''))}
         ${fila('Garantía', esc(c.garantia || ''))}
         ${fila('Validez', esc(c.validez || ''))}
+        ${fila('Referencia', esc(q.referencia || ''))}
       </div>
       ${actividadesCot(q.actividades)}
       ${difMonto ? `<div class="small warn-txt">El monto registrado en esta OT (${money(s.monto_servicio, s.moneda)}) es distinto al subtotal cotizado (${money(q.subtotal, mon)}).</div>` : ''}`;
@@ -440,6 +434,7 @@ async function renderDetalle(id){
   const ge = G.filter(g=>g.tipo==='ENTRADA'), gs = G.filter(g=>g.tipo==='SALIDA');
   const INF = A.filter(a => a.categoria === 'INFORME');
   const OCC = A.filter(a => a.categoria === 'OC_CLIENTE');
+  const REF = A.filter(esReferencia);
   const Fv = F.filter(f=>f.estado_cobro!=='ANULADA');
   const cobrado = Fv.length && Fv.every(f=>f.estado_cobro==='COBRADO');
   const steps = [
@@ -470,7 +465,7 @@ async function renderDetalle(id){
     <div class="grid-info">
       ${info('OC del cliente', (s.numero_oc_cliente ? `<span class="mono">${esc(s.numero_oc_cliente)}</span> <span class="small">${fdate(s.fecha_oc_cliente)}</span>` : '—') + `<div class="small occ" style="margin-top:2px">${OCC.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}">${tipoDoc(a)}</a><button type="button" class="link sm danger" data-rm="${a.id}" title="Quitar este archivo">✕</button>` : '').join(' · ')}${OCC.length ? ' · ' : ''}<button type="button" class="link sm" data-up="OC_CLIENTE" data-accept="${ACEPTA_OC}">${OCC.length ? '+ otro archivo' : '📎 Adjuntar OC'}</button></div>`)}
       ${info('Cotización', linkOrText(s.numero_cotizacion, s.enlace_cotizacion))}
-      ${s.referencia_cliente ? info('Referencia del cliente', esc(s.referencia_cliente)) : ''}
+      ${info('Referencia del cliente', `<span id="ref-cot">${s.numero_cotizacion ? '<span class="small">leyendo del cotizador…</span>' : '—'}</span>` + `<div class="small occ" style="margin-top:2px">${REF.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}">${tipoDoc(a)}</a><button type="button" class="link sm danger" data-rm="${a.id}" title="Quitar este archivo">✕</button>` : '').join(' · ')}${REF.length ? ' · ' : ''}<button type="button" class="link sm" data-up="REFERENCIA" data-accept="application/pdf,.pdf,image/*">${REF.length ? '+ otro documento' : '📎 Adjuntar documento'}</button></div>`)}
       ${s.numero_cotizacion ? '<div class="cot-panel" id="cot-panel"><div class="small">Cargando la cotización desde el cotizador…</div></div>' : ''}
       ${info('Informe técnico', linkOrText(s.numero_informe, s.enlace_informe) + (INF.length ? `<div class="small" style="margin-top:2px">${INF.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${tipoDoc(a)}</a>` : '').join(' · ')} · <a href="#" data-tab-ir="informes">ver informes</a></div>` : ''))}
       ${info('Monto del servicio', money(s.monto_servicio, s.moneda))}
@@ -498,7 +493,7 @@ async function renderDetalle(id){
 
   const T = document.getElementById('tab');
   const reload = () => renderDetalle(id);
-  const gi = $app.querySelector('.grid-info'); if (gi && !esPI) bindArchivos(gi, OCC, urls, id, reload, s);
+  const gi = $app.querySelector('.grid-info'); if (gi && !esPI) bindArchivos(gi, [...OCC, ...REF], urls, id, reload, s);
   const actions = (i) => `<td style="white-space:nowrap;text-align:right"><button class="link sm" data-e="${i}">Editar</button><button class="link sm danger" data-d="${i}">Quitar</button></td>`;
   const wire = (list, table, fields, title, fixed = {}, adjuntos = null) => {
     T.querySelectorAll('[data-e]').forEach(b => b.onclick = async () => { const r=list[b.dataset.e]; if (await formModal({ title:'Editar '+title, fields, data:r, onSave: async d => chk(await sb.from(table).update(d).eq('id', r.id)) })) reload(); });
@@ -605,7 +600,7 @@ async function renderDetalle(id){
 
   if (tabActual === 'archivos') {
     const grupos = Object.entries(CATS).map(([k,l]) => [k, l, A.filter(a => a.categoria === k)]).filter(g => g[2].length);
-    const etiqueta = (a) => { const c = C.find(x=>x.id===a.componente_id); const g = G.find(x=>x.id===a.guia_id); const fc = F.find(x=>x.id===a.factura_id); return c ? `Componente: ${c.descripcion}` : g ? `Guía ${g.numero_guia}` : fc ? `Factura ${fc.numero_factura}` : ''; };
+    const etiqueta = (a) => { const c = C.find(x=>x.id===a.componente_id); const g = G.find(x=>x.id===a.guia_id); const fc = F.find(x=>x.id===a.factura_id); return c ? `Componente: ${c.descripcion}` : g ? `Guía ${g.numero_guia}` : fc ? `Factura ${fc.numero_factura}` : esReferencia(a) ? 'Referencia del cliente' : ''; };
     T.innerHTML = `<div class="sec-head"><div class="small">Fotos del equipo, PDF de guías, informes (PDF o Word), OC del cliente y otros documentos del servicio.</div>
       <button class="pri sm" data-up="">+ Subir fotos / archivos</button></div>
       <div style="padding:0 12px 14px">${grupos.map(([k,l,list]) => `<h3 class="cat-h">${esc(l)} <span class="cnt">${list.length}</span></h3>
@@ -617,6 +612,7 @@ async function renderDetalle(id){
 // ---------- archivos (Supabase Storage, bucket privado) ----------
 const BUCKET = 'maestro-archivos';
 const CATS = { FOTO_EQUIPO:'Fotos del equipo', GUIA:'Guías de remisión', INFORME:'Informes', COTIZACION:'Cotizaciones', OC_CLIENTE:'OC del cliente', FACTURA:'Facturas', OTRO:'Otros' };
+const esReferencia = (a) => a.categoria === 'OTRO' && /\/referencia\//.test(a.storage_path || '');
 const esImg = (a) => (a.mime||'').startsWith('image/');
 const esWord = (a) => /msword|wordprocessingml/.test(a.mime || '') || /\.docx?$/i.test(a.nombre || '');
 const esXml = (a) => /xml/.test(a.mime || '') || /\.xml$/i.test(a.nombre || '');
@@ -710,13 +706,14 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, facturaId 
     const cat = categoria || 'FOTO_EQUIPO';
     const esInforme = cat === 'INFORME' && !componenteId && !guiaId;
     const esOC = cat === 'OC_CLIENTE' && !componenteId && !guiaId;
-    const fijo = componenteId || guiaId || esInforme || esOC || facturaId;
+    const esRef = cat === 'REFERENCIA' && !componenteId && !guiaId;
+    const fijo = componenteId || guiaId || esInforme || esOC || facturaId || esRef;
     $modal.innerHTML = `<div class="ov"><form class="modal" style="max-width:560px">
-      <header><h2>${facturaId ? 'Adjuntar factura (PDF y XML)' : guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : esOC ? 'Adjuntar OC del cliente' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
+      <header><h2>${facturaId ? 'Adjuntar factura (PDF y XML)' : guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : esOC ? 'Adjuntar OC del cliente' : esRef ? 'Documento de referencia del cliente' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
       <div class="body"><div class="fgrid">
-        <label class="f full"><span>${facturaId ? 'Archivos de la factura: PDF y XML (selecciona ambos a la vez; también el CDR .zip si lo tienes)' : esInforme ? 'Archivos del informe (PDF o Word, puedes subir ambos a la vez)' : esOC ? 'Archivo de la OC (PDF, foto o Word)' : 'Archivos (fotos, PDF o Word, varios a la vez)'}</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,' + ACEPTA_INFORME)}" required></label>
+        <label class="f full"><span>${facturaId ? 'Archivos de la factura: PDF y XML (selecciona ambos a la vez; también el CDR .zip si lo tienes)' : esInforme ? 'Archivos del informe (PDF o Word, puedes subir ambos a la vez)' : esOC ? 'Archivo de la OC (PDF, foto o Word)' : esRef ? 'Licitación, SOLPED u otro documento del cliente (PDF o imagen)' : 'Archivos (fotos, PDF o Word, varios a la vez)'}</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,' + ACEPTA_INFORME)}" required></label>
         ${fijo ? '' : `<label class="f"><span>Tipo</span><select name="cat">${Object.entries(CATS).map(([k,l])=>`<option value="${k}" ${k===cat?'selected':''}>${l}</option>`).join('')}</select></label>`}
-        <label class="f ${fijo ? 'full' : ''}"><span>${facturaId ? 'Descripción (opcional)' : esInforme ? 'N° de informe / descripción' : esOC ? 'N° de OC del cliente' : 'Descripción (opcional)'}</span><input name="desc" value="${esOC ? esc(proyecto?.numero_oc_cliente || '') : ''}" placeholder="${facturaId ? 'Ej. Factura electrónica y XML enviados al cliente' : esInforme ? 'Ej. IT-2026-015 · Informe final' : esOC ? 'Ej. 4520004034' : 'Ej. Estado de llegada, placa de datos…'}"></label>
+        <label class="f ${fijo ? 'full' : ''}"><span>${facturaId ? 'Descripción (opcional)' : esInforme ? 'N° de informe / descripción' : esOC ? 'N° de OC del cliente' : 'Descripción (opcional)'}</span><input name="desc" value="${esOC ? esc(proyecto?.numero_oc_cliente || '') : ''}" placeholder="${facturaId ? 'Ej. Factura electrónica y XML enviados al cliente' : esInforme ? 'Ej. IT-2026-015 · Informe final' : esOC ? 'Ej. 4520004034' : esRef ? 'Ej. SOLPED 30001345 · Bases de licitación' : 'Ej. Estado de llegada, placa de datos…'}"></label>
         ${esOC && !proyecto?.fecha_oc_cliente ? '<label class="f"><span>Fecha de la OC (opcional)</span><input type="date" name="focc"></label>' : ''}
       </div><p class="small" style="margin-top:10px">${facturaId ? 'Formatos: PDF, XML y ZIP (CDR de SUNAT). Límite: 25 MB por archivo.' : esInforme ? 'Formatos: PDF, .doc o .docx. Límite: 25 MB por archivo.' : esOC ? (proyecto?.numero_oc_cliente ? 'Formatos: PDF, foto o Word. Límite: 25 MB.' : 'Si escribes el N° de OC, se registra en la OT y queda como "Con OC cliente". Límite: 25 MB.') : 'Las fotos grandes se reducen automáticamente (máx. 1920 px). Límite: 25 MB por archivo.'}</p>
       <div class="prog small"></div><div class="err" hidden></div></div>
@@ -726,7 +723,7 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, facturaId 
     form.onsubmit = async (e) => {
       e.preventDefault();
       const files = [...form.f.files]; if (!files.length) return;
-      const categoriaF = guiaId ? 'GUIA' : facturaId ? 'FACTURA' : (form.cat?.value || cat);
+      const categoriaF = guiaId ? 'GUIA' : facturaId ? 'FACTURA' : esRef ? 'OTRO' : (form.cat?.value || cat);
       const btn = form.querySelector('[type=submit]'); btn.disabled = true;
       const prog = form.querySelector('.prog'); const errs = [];
       for (let k = 0; k < files.length; k++) {
@@ -737,7 +734,8 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, facturaId 
         if (facturaId && !/pdf|xml|zip/.test(f.type)) { errs.push(`${f.name}: la factura debe ser PDF, XML o ZIP (CDR)`); continue; }
         if (categoriaF === 'INFORME' && !/pdf|msword|wordprocessingml/.test(f.type)) { errs.push(`${f.name}: el informe debe ser PDF o Word (.doc / .docx)`); continue; }
         if (f.size > 25*1024*1024) { errs.push(`${f.name}: supera 25 MB`); continue; }
-        const path = `${proyectoId}/${categoriaF.toLowerCase()}/${Date.now()}_${k}_${limpiarNombre(f.name)}`;
+        if (esRef && !/pdf|^image\//.test(f.type)) { errs.push(`${f.name}: el documento debe ser PDF o imagen`); continue; }
+        const path = `${proyectoId}/${esRef ? 'referencia' : categoriaF.toLowerCase()}/${Date.now()}_${k}_${limpiarNombre(f.name)}`;
         const up = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
         if (up.error) { errs.push(`${f.name}: ${up.error.message}`); continue; }
         const ins = await sb.from('proyecto_archivos').insert({ proyecto_id: proyectoId, componente_id: componenteId, guia_id: guiaId, factura_id: facturaId, categoria: categoriaF, storage_path: path, nombre: f.name, mime: f.type, tamano: f.size, descripcion: val(form.desc.value.trim()), subido_por: session.user.id });
