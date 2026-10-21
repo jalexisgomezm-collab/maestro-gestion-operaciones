@@ -103,8 +103,9 @@ function shell(inner){
 }
 function bindShell(){ const b=document.getElementById('logout'); if(b) b.onclick = () => sb.auth.signOut(); }
 
-// ---------- informes técnicos (módulo con correlativo IT-AAAA-NNNN / GAR-AAAA-NNNN) ----------
-const TIPOS_INF = { INICIAL:'Inicial', AVANCE:'Avance', FINAL:'Final', GARANTIA:'Garantía', OTRO:'Otro' };
+// ---------- informes técnicos (correlativos: iniciales ITI-AAAA-NNNN · finales ITF-AAAA-NNNN · garantía GAR-AAAA-NNNN) ----------
+const TIPOS_INF = { INICIAL:'Inicial', FINAL:'Final', GARANTIA:'Garantía' };
+const SERIE_INF = { INICIAL:'ITI', FINAL:'ITF', GARANTIA:'GAR' };
 const ACEPTA_INF = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*';
 const archivosInf = (i) => [...(i.informe_archivos || [])].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 function enlacesInforme(i, urls){
@@ -115,7 +116,7 @@ function enlacesInforme(i, urls){
 function filaInforme(i, urls, { conOT = true, enOT = false } = {}){
   return `<tr>
     <td class="mono" style="font-weight:500;white-space:nowrap">${esc(i.numero || '—')}</td>
-    <td>${badge('op', TIPOS_INF[i.tipo] || i.tipo)}</td>
+    <td>${badge(i.tipo === 'GARANTIA' ? 'PENDIENTE_OC' : i.tipo === 'INICIAL' ? 'EN_EVALUACION' : 'CON_OC', TIPOS_INF[i.tipo] || i.tipo)}</td>
     <td><div style="font-weight:500">${esc(i.titulo)}</div>${i.observaciones ? `<div class="small">${esc(i.observaciones)}</div>` : ''}</td>
     <td style="white-space:nowrap">${fdate(i.fecha)}</td>
     ${conOT ? `<td>${i.proyectos ? `<a href="#/servicio/${i.proyecto_id}" class="mono">${esc(i.proyectos.numero_orden_trabajo || '')}</a><div class="small">${esc(i.cliente || '')}</div>` : `<span class="small">Sin OT</span>${i.cliente ? `<div class="small">${esc(i.cliente)}</div>` : ''}`}</td>` : ''}
@@ -177,7 +178,7 @@ function editarInforme(inf = null, opts = {}){
         <label class="f full"><span>Observaciones</span><textarea name="observaciones" rows="2">${esc(inf?.observaciones || '')}</textarea></label>
       </div>
       ${inf && archivosInf(inf).length ? `<div class="small" style="margin-top:6px"><b>Archivos actuales:</b> ${archivosInf(inf).map(a => `<span style="white-space:nowrap">${urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${esc(a.nombre)}</a>` : esc(a.nombre)} <button type="button" class="link sm danger" data-rmf="${a.id}" title="Quitar este archivo">✕</button></span>`).join(' · ')}</div>` : ''}
-      <p class="small" style="margin-top:8px">${inf ? 'El número del informe no cambia.' : 'El <b>número</b> se asigna solo al guardar: <b>IT-AAAA-NNNN</b> (garantías: <b>GAR-AAAA-NNNN</b>), continuando la numeración usada.'}</p>
+      <p class="small" style="margin-top:8px">${inf ? 'El número no cambia; solo si cambias el <b>tipo</b> recibe el siguiente número de la nueva serie.' : 'El <b>número</b> se asigna solo al guardar según el tipo: iniciales <b>ITI-AAAA-NNNN</b>, finales <b>ITF-AAAA-NNNN</b> y garantía <b>GAR-AAAA-NNNN</b>, continuando la numeración usada.'}</p>
       <div class="prog small"></div><div class="err" hidden></div></div>
       <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">${inf ? 'Guardar cambios' : 'Registrar informe'}</button></footer></form></div>`;
     const form = $modal.querySelector('form');
@@ -252,7 +253,7 @@ async function renderInformes(){
       <div><h1>Informes técnicos</h1><div class="sub">Registro de todos los informes con su número correlativo, vinculados a la OT y a la cotización.</div></div>
       <button class="pri" id="inf-nuevo">+ Nuevo informe</button>
     </div>
-    <div class="kpis">${kpi(lista.length, 'Informes registrados')}${kpi(lista.filter(i => String(i.fecha || '').startsWith(String(anio))).length, `Del ${anio}`)}${kpi(lista.filter(i => !i.proyecto_id).length, 'Sin OT vinculada')}${kpi(lista.filter(i => !archivosInf(i).length).length, 'Sin archivo')}</div>
+    <div class="kpis">${kpi(lista.length, 'Informes registrados')}${kpi(lista.filter(i => i.tipo === 'INICIAL').length, 'Iniciales (ITI)')}${kpi(lista.filter(i => i.tipo === 'FINAL').length, 'Finales (ITF)')}${kpi(lista.filter(i => i.tipo === 'GARANTIA').length, 'Garantía (GAR)')}${kpi(lista.filter(i => !i.proyecto_id).length, 'Sin OT vinculada')}</div>
     <div class="panel">
       <div class="toolbar">
         <input type="search" id="inf-q" placeholder="Buscar N°, título, cliente, OT o cotización…" value="${esc(filtroInf.q)}">
@@ -805,7 +806,7 @@ async function renderDetalle(id){
   }
 
   if (tabActual === 'informes') {
-    T.innerHTML = `<div class="sec-head"><div class="small">Informes técnicos de ${esPI ? 'este proyecto' : 'esta OT'} con su número correlativo (IT-AAAA-NNNN · garantías GAR-AAAA-NNNN). También los ves todos en <a href="#/informes">Informes técnicos</a>.</div>
+    T.innerHTML = `<div class="sec-head"><div class="small">Informes técnicos de ${esPI ? 'este proyecto' : 'esta OT'} con su número correlativo (iniciales ITI · finales ITF · garantía GAR). También los ves todos en <a href="#/informes">Informes técnicos</a>.</div>
       <div class="row"><button class="sm" id="inf-vinc">Vincular informe existente</button><button class="pri sm" id="inf-add">+ Nuevo informe</button></div></div>
       <div class="tbl-wrap"><table><thead><tr><th>N° informe</th><th>Tipo</th><th>Título</th><th>Fecha</th><th>Cotización</th><th>Archivos</th><th></th></tr></thead><tbody>
       ${INF.map(i => filaInforme(i, urls, { conOT:false, enOT:true })).join('') || '<tr><td colspan="7" class="empty">Aún no hay informes vinculados. Registra uno con «+ Nuevo informe» (el número se asigna solo).</td></tr>'}
