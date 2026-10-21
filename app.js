@@ -1169,7 +1169,7 @@ async function renderLabDetalle(id){
 // ---------- rótulo de despacho (plantilla /rotulo.html; un rótulo por bulto) ----------
 const ROTULO_PROVEEDOR = { nombre: 'GTO PERÚ S.A.C.', direccion: 'Variante de Uchumayo km 5.5', ciudad: 'Sachaca · Arequipa' };
 const ROTULO_CONTACTO = { area: 'GERENCIA COMERCIAL', nombres: 'IGOR FERNÁNDEZ', telefonos: '+51 937 339 957  /  +51 914 493 884', correo: 'ifernandez@gtoperu.com', direccion: 'Cal. German Schreiber N.º 276 Int. T301, Urb. Santa Ana · San Isidro, Lima' };
-const TIPOS_REF = ['SOLPED', 'REQUERIMIENTO', 'PEDIDO', 'LICITACION', 'LICITACIÓN', 'OC', 'OS', 'CONTRATO'];
+const TIPOS_REF = ['SOLPED', 'PR', 'REQUERIMIENTO', 'PEDIDO', 'LICITACION', 'LICITACIÓN', 'OC', 'OS', 'CONTRATO'];
 const fechaDMY = (d) => { const x = String(d || '').slice(0, 10).split('-'); return x.length === 3 ? `${x[2]}/${x[1]}/${x[0]}` : ''; };
 const b64url = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const urlRotulo = (datos) => `/rotulo.html?data=${b64url(datos)}`;
@@ -1195,7 +1195,7 @@ async function abrirRotulo({ s, C, G, F }){
   const facts = F.filter(f => f.estado_cobro !== 'ANULADA').map(f => f.numero_factura).filter(Boolean).join(', ');
   const base = {
     tamano: ult?.tamano || 'A4',
-    cliente: { nombre: s.cliente || ult?.cliente?.nombre || '', direccion: ult?.cliente?.direccion || cli?.direccion || '', ciudad: ult?.cliente?.ciudad || '' },
+    cliente: { nombre: s.cliente || ult?.cliente?.nombre || '', direccion: ult?.cliente?.direccion || '', ciudad: ult?.cliente?.ciudad || '' },  // lugar de entrega que indica el cliente (no la dirección fiscal)
     destinoFinal: ult?.destinoFinal || '',
     referencia: { tipo: ult?.referencia?.tipo || ref.tipo, numero: ult?.referencia?.numero || ref.numero, detalle: ult?.referencia?.detalle || (ref.numero ? 'Pedido / requerimiento del cliente' : '') },
     ordenCompra: s.numero_oc_cliente || ult?.ordenCompra || '',
@@ -1228,8 +1228,8 @@ async function abrirRotulo({ s, C, G, F }){
           </tbody></table></div><div class="small" style="margin-top:4px">1 producto marcado = formato de producto único; 2 o más = tabla de contenido del bulto.</div>` : '<div class="err">Esta OT no tiene componentes. Agrégalos en la pestaña Componentes (descripción, N° de parte y N° de serie).</div>'}</div>
         <div class="fsec">Destino y documentos</div>
         ${lab('Cliente', inp('c_nom', base.cliente.nombre))}
-        ${lab('Dirección del cliente', inp('c_dir', base.cliente.direccion, cli ? '' : 'No figura en el cotizador'))}
-        ${lab('Ciudad / distrito', inp('c_ciu', base.cliente.ciudad, 'Ej. San Juan de Marcona'))}
+        ${lab('Dirección de entrega (según indique el cliente)', inp('c_dir', base.cliente.direccion, 'Ej. Almacén central, Av. … (no necesariamente la fiscal)'))}
+        ${lab('Ciudad / distrito de entrega', inp('c_ciu', base.cliente.ciudad, 'Ej. San Juan de Marcona'))}
         ${lab('Destino final / unidad', inp('destino', base.destinoFinal, 'Ej. San Nicolás'))}
         ${lab('Referencia (tipo)', inp('r_tipo', base.referencia.tipo, 'SOLPED', 'list="dl-rtipo"') + `<datalist id="dl-rtipo">${TIPOS_REF.filter(t => t !== 'LICITACIÓN').map(t => `<option>${t}</option>`).join('')}</datalist>`)}
         ${lab('Referencia (N°)', inp('r_num', base.referencia.numero))}
