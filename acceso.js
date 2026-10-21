@@ -1,5 +1,5 @@
-// Bloquea el Maestro para quien no tenga acceso de Maestro (es_maestro): solicitantes de área y rol Administración.
-// Lee la sesión que guarda app.js (no crea otro cliente de Supabase) y consulta el rol con mi_perfil().
+// Bloquea el Maestro para quien no tenga acceso: entra Maestro (es_maestro) y el área LABORATORIO (vista técnica).
+// Lee la sesión que guarda app.js (no crea otro cliente de Supabase) y consulta el acceso con acceso_maestro() y el rol con mi_perfil().
 const URL_SB = 'https://cbguxckfkaxytgzxvpxe.supabase.co';
 const KEY = 'sb_publishable_yx0C0-9u7_Z4FsfkFRPm8g__2FsSEf4';
 const STORAGE_KEY = 'sb-cbguxckfkaxytgzxvpxe-auth-token';
@@ -44,8 +44,21 @@ async function revisar(){
     if (!r.ok) return; // token vencido: se reintenta cuando la app lo renueve
     const data = await r.json();
     const p = Array.isArray(data) ? data[0] : data;
+    if (p && !p.es_maestro) {
+      // ¿es del área de laboratorio? (vista técnica sin montos)
+      const r2 = await fetch(`${URL_SB}/rest/v1/rpc/acceso_maestro`, {
+        method: 'POST',
+        headers: { apikey: KEY, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      if (!r2.ok) return;
+      const modo = await r2.json();
+      revisado = uid;
+      if (modo === 'laboratorio') desbloquear(); else bloquear(s.user.email, p.rol);
+      return;
+    }
     revisado = uid;
-    if (p && !p.es_maestro) bloquear(s.user.email, p.rol); else desbloquear();
+    desbloquear();
   } catch { /* sin red: se reintenta */ }
 }
 

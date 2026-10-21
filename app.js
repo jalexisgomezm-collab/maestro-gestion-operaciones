@@ -27,6 +27,8 @@ const badge = (cls, txt) => `<span class="badge b-${esc(cls)}">${esc(txt)}</span
 
 // ---------- estado ----------
 let session = null;
+let MODO = null;  // 'total' (Maestro) | 'laboratorio' (vista técnica) | 'ninguno'
+const LAB = () => MODO === 'laboratorio';
 let filtro = { clase: 'SERVICIO', estado: 'TODOS', q: '', verCerrados: false };
 
 // ---------- modal genérico de formulario ----------
@@ -96,6 +98,7 @@ function renderLogin(){
 function shell(inner){
   return `<header class="top"><a href="#/" class="brand" style="color:#fff">GTO PERU · <span>Maestro de Gestión</span></a>
     <div class="sp"></div>
+    ${LAB() ? '<span class="badge b-pi" style="margin-right:4px">Laboratorio</span><a href="#/" style="color:#fff;font-size:13px;font-weight:500">Servicios</a>' : ''}
     <a href="#/informes" style="color:#fff;font-size:13px;font-weight:500">Informes técnicos</a>
     <a href="${OC_APP}" target="_blank" rel="noopener" style="color:#cbd5e1;font-size:13px">Sistema OC ↗</a>
     <span class="user">${esc(session?.user?.email)}</span>
@@ -120,11 +123,12 @@ function filaInforme(i, urls, { conOT = true, enOT = false } = {}){
     <td><div style="font-weight:500">${esc(i.titulo)}</div>${i.observaciones ? `<div class="small">${esc(i.observaciones)}</div>` : ''}</td>
     <td style="white-space:nowrap">${fdate(i.fecha)}</td>
     ${conOT ? `<td>${i.proyectos ? `<a href="#/servicio/${i.proyecto_id}" class="mono">${esc(i.proyectos.numero_orden_trabajo || '')}</a><div class="small">${esc(i.cliente || '')}</div>` : `<span class="small">Sin OT</span>${i.cliente ? `<div class="small">${esc(i.cliente)}</div>` : ''}`}</td>` : ''}
-    <td class="mono">${esc(i.numero_cotizacion || '—')}</td>
+    ${LAB() ? '' : `<td class="mono">${esc(i.numero_cotizacion || '—')}</td>`}
     <td style="white-space:nowrap">${enlacesInforme(i, urls)}</td>
-    <td style="white-space:nowrap;text-align:right"><button class="link sm" data-inf-e="${i.id}">Editar</button>${enOT ? `<button class="link sm" data-inf-q="${i.id}" title="Desvincular de esta OT (el informe no se borra)">Quitar de la OT</button>` : `<button class="link sm danger" data-inf-d="${i.id}">Eliminar</button>`}</td></tr>`;
+    <td style="white-space:nowrap;text-align:right"><button class="link sm" data-inf-e="${i.id}">Editar</button>${LAB() ? '' : enOT ? `<button class="link sm" data-inf-q="${i.id}" title="Desvincular de esta OT (el informe no se borra)">Quitar de la OT</button>` : `<button class="link sm danger" data-inf-d="${i.id}">Eliminar</button>`}</td></tr>`;
 }
 async function listaProyectosSimple(){
+  if (LAB()) { const { data } = await sb.rpc('lab_servicios').select('id,numero_orden_trabajo,nombre,cliente,clase,estado').order('numero_orden_trabajo', { ascending:false }); return data || []; }
   const { data } = await sb.from('proyectos').select('id,numero_orden_trabajo,nombre,cliente,numero_cotizacion,clase,estado').order('numero_orden_trabajo', { ascending:false });
   return data || [];
 }
@@ -171,7 +175,7 @@ function editarInforme(inf = null, opts = {}){
         <label class="f"><span>Fecha del informe</span><input type="date" name="fecha" value="${esc(inf?.fecha || hoy)}"></label>
         <label class="f full"><span>Título *</span><input name="titulo" required value="${esc(inf?.titulo || '')}" placeholder="Ej. Informe técnico final – reparación de variador ACS800"></label>
         <label class="f full"><span>Orden de trabajo (OT / PI)</span><select name="proyecto_id"><option value="">— Sin OT por ahora —</option>${proys.map(p => `<option value="${p.id}" ${p.id === ot ? 'selected' : ''}>${esc(p.numero_orden_trabajo || '')} · ${esc(p.nombre || '')}${p.cliente ? ' · ' + esc(p.cliente) : ''}${p.estado !== 'activo' ? ` (${esc(p.estado)})` : ''}</option>`).join('')}</select></label>
-        <label class="f"><span>N° de cotización</span><input name="numero_cotizacion" list="dl-inf-cot" autocomplete="off" value="${esc(inf?.numero_cotizacion || '')}" placeholder="Se toma de la OT o elige del cotizador"><datalist id="dl-inf-cot"></datalist></label>
+        <label class="f" ${LAB() ? 'style="display:none"' : ''}><span>N° de cotización</span><input name="numero_cotizacion" list="dl-inf-cot" autocomplete="off" value="${esc(inf?.numero_cotizacion || '')}" placeholder="Se toma de la OT o elige del cotizador"><datalist id="dl-inf-cot"></datalist></label>
         <label class="f"><span>Cliente</span><input name="cliente" list="dl-inf-cli" autocomplete="off" value="${esc(inf?.cliente || '')}"><datalist id="dl-inf-cli"></datalist></label>
         <label class="f"><span>Responsable / elaborado por</span><input name="responsable" value="${esc(inf?.responsable || '')}"></label>
         <label class="f"><span>${inf ? 'Agregar archivos' : 'Archivos del informe'} (PDF, Word o imagen)</span><input type="file" name="f" multiple accept="${ACEPTA_INF}"></label>
@@ -192,7 +196,7 @@ function editarInforme(inf = null, opts = {}){
       if (!form.cliente.value.trim() && p.cliente) form.cliente.value = p.cliente;
     };
     if (!inf && ot) form.proyecto_id.onchange();
-    listasCotizador().then(({ clientes, cotizaciones }) => {
+    if (!LAB()) listasCotizador().then(({ clientes, cotizaciones }) => {
       if (!form.isConnected) return;
       document.getElementById('dl-inf-cot').innerHTML = cotizaciones.map(q => `<option value="${esc(q.numero)}">${esc([q.cliente, q.referencia].filter(Boolean).join(' · '))}</option>`).join('');
       document.getElementById('dl-inf-cli').innerHTML = clientes.map(c => `<option value="${esc(c.razon_social)}"></option>`).join('');
@@ -250,7 +254,7 @@ async function renderInformes(){
   const kpi = (n, l) => `<div class="kpi" style="cursor:default"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   $app.querySelector('main').innerHTML = `
     <div class="row" style="justify-content:space-between">
-      <div><h1>Informes técnicos</h1><div class="sub">Registro de todos los informes con su número correlativo, vinculados a la OT y a la cotización.</div></div>
+      <div><h1>Informes técnicos</h1><div class="sub">Registro de todos los informes con su número correlativo${LAB() ? ', vinculados a cada OT.' : ', vinculados a la OT y a la cotización.'}</div></div>
       <button class="pri" id="inf-nuevo">+ Nuevo informe</button>
     </div>
     <div class="kpis">${kpi(lista.length, 'Informes registrados')}${kpi(lista.filter(i => i.tipo === 'INICIAL').length, 'Iniciales (ITI)')}${kpi(lista.filter(i => i.tipo === 'FINAL').length, 'Finales (ITF)')}${kpi(lista.filter(i => i.tipo === 'GARANTIA').length, 'Garantía (GAR)')}${kpi(lista.filter(i => !i.proyecto_id).length, 'Sin OT vinculada')}</div>
@@ -260,8 +264,8 @@ async function renderInformes(){
         <select id="inf-tipo"><option value="TODOS">Todos los tipos</option>${Object.entries(TIPOS_INF).map(([k,l]) => `<option value="${k}" ${filtroInf.tipo===k?'selected':''}>${l}</option>`).join('')}</select>
         <div style="flex:1"></div><span class="small">${rows.length} informe(s)</span>
       </div>
-      <div class="tbl-wrap"><table><thead><tr><th>N° informe</th><th>Tipo</th><th>Título</th><th>Fecha</th><th>OT / cliente</th><th>Cotización</th><th>Archivos</th><th></th></tr></thead>
-      <tbody>${rows.map(i => filaInforme(i, urls)).join('') || '<tr><td colspan="8" class="empty">No hay informes con este filtro.</td></tr>'}</tbody></table></div>
+      <div class="tbl-wrap"><table><thead><tr><th>N° informe</th><th>Tipo</th><th>Título</th><th>Fecha</th><th>OT / cliente</th>${LAB() ? '' : '<th>Cotización</th>'}<th>Archivos</th><th></th></tr></thead>
+      <tbody>${rows.map(i => filaInforme(i, urls)).join('') || '<tr><td colspan="${LAB() ? 7 : 8}" class="empty">No hay informes con este filtro.</td></tr>'}</tbody></table></div>
     </div>`;
   document.getElementById('inf-nuevo').onclick = async () => { if (await editarInforme()) renderInformes(); };
   document.getElementById('inf-q').oninput = (e) => { filtroInf.q = e.target.value; clearTimeout(window._iq); window._iq = setTimeout(() => renderInformes().then(() => { const i = document.getElementById('inf-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
@@ -931,7 +935,7 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, facturaId 
     const esInforme = cat === 'INFORME' && !componenteId && !guiaId;
     const esOC = cat === 'OC_CLIENTE' && !componenteId && !guiaId;
     const esRef = cat === 'REFERENCIA' && !componenteId && !guiaId;
-    const fijo = componenteId || guiaId || esInforme || esOC || facturaId || esRef;
+    const fijo = LAB() || componenteId || guiaId || esInforme || esOC || facturaId || esRef;
     $modal.innerHTML = `<div class="ov"><form class="modal" style="max-width:560px">
       <header><h2>${facturaId ? 'Adjuntar factura (PDF y XML)' : guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : esOC ? 'Adjuntar OC del cliente' : esRef ? 'Documento de referencia del cliente' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
       <div class="body"><div class="fgrid">
@@ -1025,17 +1029,157 @@ function pickModal(title, items, onSave){
   });
 }
 
+// ---------- vista LABORATORIO (solo datos técnicos: sin montos, facturación, cotización ni estado comercial) ----------
+let filtroLab = { q: '', clase: 'SERVICIO', verCerrados: false };
+let tabLab = 'componentes';
+const diasEntreLab = (a, b) => a ? Math.max(0, Math.round((new Date(String(b || new Date().toISOString().slice(0,10)).slice(0,10) + 'T00:00:00') - new Date(String(a).slice(0,10) + 'T00:00:00')) / 86400000)) : null;
+async function renderLabLista(){
+  $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
+  const { data, error } = await sb.rpc('lab_servicios');
+  if (error) { $app.querySelector('main').innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  const todos = data || [];
+  const deClase = todos.filter(p => (p.clase || 'SERVICIO') === filtroLab.clase);
+  const q = filtroLab.q.toLowerCase();
+  const rows = deClase.filter(p => (filtroLab.verCerrados || p.estado === 'activo') &&
+    (!q || [p.numero_orden_trabajo, p.nombre, p.cliente, p.numero_oc_cliente, p.series, p.informes, p.guia_ingreso, p.responsable].some(x => (x || '').toLowerCase().includes(q))));
+  const act = deClase.filter(p => p.estado === 'activo');
+  const kpi = (n, l) => `<div class="kpi" style="cursor:default"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  $app.querySelector('main').innerHTML = `
+    <div class="row" style="justify-content:space-between">
+      <div><h1>${filtroLab.clase === 'INTERNO' ? 'Proyectos internos' : 'Servicios'} · vista técnica</h1><div class="sub">Datos técnicos de cada OT: N° de OC del cliente, ingreso del equipo, componentes con N° de serie e informes técnicos.</div></div>
+      <div class="row"><button class="${filtroLab.clase === 'SERVICIO' ? 'pri' : ''}" data-clase="SERVICIO">Servicios</button><button class="${filtroLab.clase === 'INTERNO' ? 'pri' : ''}" data-clase="INTERNO">Proyectos internos</button></div>
+    </div>
+    <div class="kpis">${kpi(act.length, 'Activos')}${kpi(act.filter(p => p.estado_operativo === 'EN_PROCESO').length, 'En proceso')}${kpi(act.filter(p => p.fecha_ingreso && !p.fecha_salida).length, 'Equipos en taller')}${kpi(act.filter(p => !p.informes).length, 'Sin informe')}</div>
+    <div class="panel">
+      <div class="toolbar">
+        <input type="search" id="lab-q" placeholder="Buscar OT, cliente, N° OC, N° de serie, informe…" value="${esc(filtroLab.q)}">
+        <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="lab-cerr" ${filtroLab.verCerrados ? 'checked' : ''} style="width:auto"> Ver finalizados</label>
+        <div style="flex:1"></div><span class="small">${rows.length} registro(s)</span>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>OT</th><th>Servicio / Cliente</th><th>Estado</th><th>N° OC cliente</th><th>Fecha de ingreso</th><th>N° de serie</th><th>Comp.</th><th>Informes</th></tr></thead>
+      <tbody>${rows.map(p => `<tr class="click" data-id="${p.id}">
+        <td class="mono" style="font-weight:500;white-space:nowrap">${esc(p.numero_orden_trabajo || '—')}</td>
+        <td><div style="font-weight:500">${esc(p.nombre)}</div><div class="small">${esc(p.cliente || 'Sin cliente')}${p.estado !== 'activo' ? ` · ${esc(p.estado)}` : ''}</div></td>
+        <td>${badge('op', EST_OP[p.estado_operativo] || p.estado_operativo || '—')}</td>
+        <td class="mono">${esc(p.numero_oc_cliente || '—')}${p.fecha_oc_cliente ? `<div class="small">${fdate(p.fecha_oc_cliente)}</div>` : ''}</td>
+        <td style="white-space:nowrap">${p.fecha_ingreso ? `${fdate(p.fecha_ingreso)}<div class="small">${esc(p.guia_ingreso || '')}</div>` : '<span class="small">Sin guía</span>'}</td>
+        <td class="mono small" style="max-width:200px">${esc(p.series || '—')}</td>
+        <td class="mono">${p.n_componentes || 0}</td>
+        <td class="mono small" style="white-space:nowrap">${(p.informes || '—').split(', ').map(esc).join('<br>')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No hay registros con este filtro.</td></tr>'}</tbody></table></div>
+    </div>`;
+  $app.querySelectorAll('[data-clase]').forEach(b => b.onclick = () => { filtroLab.clase = b.dataset.clase; renderLabLista(); });
+  $app.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => { location.hash = `#/servicio/${tr.dataset.id}`; });
+  document.getElementById('lab-cerr').onchange = (e) => { filtroLab.verCerrados = e.target.checked; renderLabLista(); };
+  document.getElementById('lab-q').oninput = (e) => { filtroLab.q = e.target.value; clearTimeout(window._lq); window._lq = setTimeout(() => renderLabLista().then(() => { const i = document.getElementById('lab-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
+}
+
+async function renderLabDetalle(id){
+  $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
+  const [p, comp, guias, arch, infs] = await Promise.all([
+    sb.rpc('lab_servicios').eq('id', id).maybeSingle(),
+    sb.from('proyecto_componentes').select('*').eq('proyecto_id', id).order('created_at'),
+    sb.from('proyecto_guias').select('*').eq('proyecto_id', id).order('fecha'),
+    sb.from('proyecto_archivos').select('*').eq('proyecto_id', id).order('created_at'),
+    sb.from('informes_tecnicos').select('*, informe_archivos(*)').eq('proyecto_id', id).order('numero'),
+  ]);
+  if (p.error || !p.data) { $app.querySelector('main').innerHTML = `<a class="back" href="#/">← Volver</a><div class="err">No se encontró el servicio.</div>`; return; }
+  const s = p.data, C = comp.data || [], G = guias.data || [], A = arch.data || [], INF = infs.data || [];
+  const urls = await firmarUrls([...A, ...INF.flatMap(archivosInf)]);
+  const ge = G.filter(g => g.tipo === 'ENTRADA'), gs = G.filter(g => g.tipo === 'SALIDA');
+  const dias = diasEntreLab(s.fecha_ingreso, s.fecha_salida);
+  const esPI = s.clase === 'INTERNO';
+  const info = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const fotos = A.filter(a => a.categoria === 'FOTO_EQUIPO');
+  const tabs = [['componentes','Componentes',C.length],['guias','Guías de remisión',G.length],['informes','Informes técnicos',INF.length],['fotos','Fotos',fotos.length]];
+  $app.querySelector('main').innerHTML = `
+    <a class="back" href="#/">← ${esPI ? 'Proyectos internos' : 'Servicios'}</a>
+    <div class="detail-head">
+      <div><div class="ot-tag ${esPI ? 'pi ' : ''}mono">${esc(s.numero_orden_trabajo || '')}</div><h1>${esc(s.nombre)}</h1><div class="sub">${esc(s.cliente || (esPI ? 'Proyecto interno' : 'Sin cliente'))} · ${esc((s.tipo || '').toLowerCase())}${s.estado !== 'activo' ? ' · ' + esc(s.estado) : ''}</div>
+        <div class="row" style="margin-top:6px">${badge('op', EST_OP[s.estado_operativo] || s.estado_operativo || '—')} ${badge('pi', 'Vista técnica · Laboratorio')}</div></div>
+    </div>
+    <div class="grid-info">
+      ${info('N° OC del cliente', s.numero_oc_cliente ? `<span class="mono">${esc(s.numero_oc_cliente)}</span> <span class="small">${fdate(s.fecha_oc_cliente)}</span>` : '—')}
+      ${info('Fecha de ingreso', s.fecha_ingreso ? `${fdate(s.fecha_ingreso)} <div class="small">Guía ${esc(s.guia_ingreso || '')}${ge.length > 1 ? ` (+${ge.length - 1} guía${ge.length > 2 ? 's' : ''} más)` : ''} · ${dias} día${dias === 1 ? '' : 's'} en taller${s.fecha_salida ? ` · salió el ${fdate(s.fecha_salida)}` : ''}</div>` : '<span class="small">Sin guía de entrada registrada</span>')}
+      ${info('N° de serie', s.series ? `<span class="mono">${esc(s.series)}</span>` : '—')}
+      ${info('Informe técnico', (INF.length ? INF.map(i => `<div style="margin-bottom:2px"><a href="#" data-tab-ir="informes" class="mono">${esc(i.numero)}</a> · ${esc(i.titulo)} ${enlacesInforme(i, urls)}</div>`).join('') : '—') + `<div class="small" style="margin-top:2px"><button type="button" class="link sm" id="inf-add-top">+ Registrar informe</button></div>`)}
+      ${info('Responsable', esc(s.responsable || '—'))}
+      ${info('Inicio / entrega', `${fdate(s.fecha_inicio)} → ${fdate(s.fecha_entrega)}`)}
+      ${info('Alcance / descripción', `<div style="white-space:pre-line">${esc(s.descripcion || '—')}</div>`)}
+    </div>
+    <div class="panel">
+      <div class="tabs">${tabs.map(([k,l,n]) => `<button data-t="${k}" class="${tabLab === k ? 'on' : ''}">${l}<span class="cnt">${n}</span></button>`).join('')}</div>
+      <div id="tab"></div>
+    </div>`;
+  const reload = () => renderLabDetalle(id);
+  $app.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { tabLab = b.dataset.t; reload(); });
+  $app.querySelectorAll('[data-tab-ir]').forEach(a => a.onclick = (e) => { e.preventDefault(); tabLab = a.dataset.tabIr; reload(); });
+  document.getElementById('inf-add-top').onclick = async () => { if (await editarInforme(null, { proyectoId: id })) reload(); };
+  const T = document.getElementById('tab');
+  // solo se pueden borrar las fotos que subió el propio usuario
+  const soloPropios = () => T.querySelectorAll('[data-rm]').forEach(b => { const a = A.find(x => x.id === b.dataset.rm); if (!a || a.subido_por !== session.user.id) b.remove(); });
+
+  if (tabLab === 'componentes') {
+    const fields = [
+      { k:'descripcion', l:'Componente / descripción', req:true, full:true, ph:'Ej. Tarjeta electrónica de control' },
+      { k:'marca', l:'Marca' }, { k:'modelo', l:'Modelo' },
+      { k:'numero_parte', l:'N° de parte (N/P)' }, { k:'numero_serie', l:'N° de serie' },
+      { k:'cantidad', l:'Cantidad', t:'number', def:1 },
+      { k:'datos_tecnicos', l:'Datos técnicos adicionales', t:'area', full:true, ph:'Voltaje, horómetro, falla reportada, etc.' },
+      { k:'observacion', l:'Observación', full:true },
+    ];
+    T.innerHTML = `<div class="sec-head"><div class="small">Equipos o piezas del servicio. Puedes agregar componentes, completar el N° de serie y los datos técnicos, y subir fotos.</div><button class="pri sm" id="comp-add">+ Agregar componente</button></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Fotos</th><th>Componente</th><th>Marca / Modelo</th><th>N° parte</th><th>N° serie</th><th>Cant.</th><th>Ingreso</th><th>Datos técnicos</th><th></th></tr></thead><tbody>
+      ${C.map((c, i) => `<tr><td>${miniFotos(fotos.filter(a => a.componente_id === c.id), urls, c.id)}</td><td>${esc(c.descripcion)}${c.observacion ? `<div class="small">${esc(c.observacion)}</div>` : ''}</td><td>${esc([c.marca, c.modelo].filter(Boolean).join(' / ') || '—')}</td><td class="mono">${esc(c.numero_parte || '—')}</td><td class="mono">${esc(c.numero_serie || '—')}</td><td class="mono">${esc(c.cantidad)}</td><td class="small" style="white-space:nowrap">${s.fecha_ingreso ? `${fdate(s.fecha_ingreso)}<div>${esc(s.guia_ingreso || '')}</div>` : '—'}</td><td class="small" style="max-width:280px;white-space:pre-line">${esc(c.datos_tecnicos || '—')}</td><td style="text-align:right"><button class="link sm" data-ce="${i}">Editar</button></td></tr>`).join('') || '<tr><td colspan="9" class="empty">Sin componentes registrados.</td></tr>'}
+      </tbody></table></div>`;
+    T.querySelectorAll('[data-ce]').forEach(b => b.onclick = async () => { const r = C[b.dataset.ce]; if (await formModal({ title: 'Editar componente', fields, data: r, onSave: async d => chk(await sb.from('proyecto_componentes').update(d).eq('id', r.id)) })) reload(); });
+    document.getElementById('comp-add').onclick = async () => { if (await formModal({ title: 'Agregar componente', fields, data: {}, onSave: async d => chk(await sb.from('proyecto_componentes').insert({ ...d, proyecto_id: id })) })) reload(); };
+    bindArchivos(T, fotos, urls, id, reload); soloPropios();
+  }
+
+  if (tabLab === 'guias') {
+    const pdfs = (gid) => A.filter(a => a.guia_id === gid && urls[a.storage_path]).map(a => `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${esImg(a) ? 'Imagen' : 'PDF'}</a>`).join(' · ');
+    T.innerHTML = `<div class="sec-head"><div class="small">Guías de remisión de entrada (ingreso a taller) y salida. Las registra Administración.</div></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Tipo</th><th>N° guía</th><th>Fecha</th><th>Detalle</th><th>Archivo</th></tr></thead><tbody>
+      ${G.map(g => `<tr><td>${badge(g.tipo === 'ENTRADA' ? 'CON_OC' : 'op', g.tipo === 'ENTRADA' ? 'Entrada' : 'Salida')}</td><td class="mono">${esc(g.numero_guia)}</td><td style="white-space:nowrap">${fdate(g.fecha)}</td><td class="small">${esc(g.detalle || '—')}${g.observacion ? `<div>${esc(g.observacion)}</div>` : ''}</td><td class="small">${pdfs(g.id) || '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin guías registradas.</td></tr>'}
+      </tbody></table></div>`;
+  }
+
+  if (tabLab === 'informes') {
+    T.innerHTML = `<div class="sec-head"><div class="small">Informes técnicos de esta OT (iniciales ITI · finales ITF · garantía GAR). El número se asigna solo al registrarlo.</div>
+      <button class="pri sm" id="inf-add">+ Nuevo informe</button></div>
+      <div class="tbl-wrap"><table><thead><tr><th>N° informe</th><th>Tipo</th><th>Título</th><th>Fecha</th><th>Archivos</th><th></th></tr></thead><tbody>
+      ${INF.map(i => filaInforme(i, urls, { conOT:false, enOT:true })).join('') || '<tr><td colspan="6" class="empty">Aún no hay informes. Regístralo con «+ Nuevo informe».</td></tr>'}
+      </tbody></table></div>`;
+    bindFilasInforme(T, INF, reload);
+    document.getElementById('inf-add').onclick = async () => { if (await editarInforme(null, { proyectoId: id })) reload(); };
+  }
+
+  if (tabLab === 'fotos') {
+    const etiqueta = (a) => { const c = C.find(x => x.id === a.componente_id); return c ? `Componente: ${c.descripcion}` : ''; };
+    T.innerHTML = `<div class="sec-head"><div class="small">Fotos del equipo (estado de llegada, placa de datos, avance de la reparación…).</div>
+      <button class="pri sm" data-up="FOTO_EQUIPO" data-accept="image/*">+ Subir fotos</button></div>
+      <div style="padding:0 12px 14px">${fotos.length ? `<div class="gal">${fotos.map(a => tarjeta(a, urls, etiqueta(a))).join('')}</div>` : '<div class="empty">Aún no hay fotos. Súbelas con el botón de arriba (desde el celular puedes tomar la foto directamente).</div>'}</div>`;
+    bindArchivos(T, fotos, urls, id, reload); soloPropios();
+  }
+}
+
 // ---------- router ----------
-function route(){
+async function route(){
   $modal.innerHTML = ''; document.onkeydown = null;  // cerrar ventanas abiertas al cambiar de página
-  if (!session) return renderLogin();
+  if (!session) { MODO = null; return renderLogin(); }
+  if (!MODO) { const r = await sb.rpc('acceso_maestro'); MODO = r.error ? 'total' : (r.data || 'ninguno'); }
   const m = location.hash.match(/^#\/servicio\/([0-9a-f-]{36})/);
+  if (LAB()) {
+    if (m) return renderLabDetalle(m[1]);
+    if (location.hash.startsWith('#/informes')) return renderInformes();
+    return renderLabLista();
+  }
   if (m) return renderDetalle(m[1]);
   if (location.hash.startsWith('#/informes')) return renderInformes();
   return renderLista();
 }
-window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/servicio/')) tabActual = 'componentes'; route(); });
-sb.auth.onAuthStateChange((_e, s) => { const changed = !!s !== !!session; session = s; if (changed) route(); });
+window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/servicio/')) { tabActual = 'componentes'; tabLab = 'componentes'; } route(); });
+sb.auth.onAuthStateChange((_e, s) => { const changed = (s?.user?.id || null) !== (session?.user?.id || null); session = s; if (changed) { MODO = null; route(); } });
 const { data } = await sb.auth.getSession();
 session = data.session;
 route();
