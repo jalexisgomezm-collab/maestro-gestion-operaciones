@@ -13,7 +13,7 @@
      Soporta varios productos por bulto (lista "items"); la tabla se ajusta sola.
      ===================================================================== */
   :root { --green:#00984A; --green-dk:#00703A; --ink:#1F2622; --muted:#5E6762; --line:#1F3A2C; --soft:#D5DCD8; --tint:#EEF7F1; --k:1; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   html, body { background: #E9ECEA; font-family: Arial, Helvetica, sans-serif; color: var(--ink); }
   body { padding: 16px; }
   .toolbar { display:flex; gap:8px; align-items:center; justify-content:center; margin:0 auto 14px; flex-wrap:wrap; font-size:14px; }
@@ -67,7 +67,14 @@
   .side { border-left:.35mm solid var(--line); display:grid; grid-template-rows:23mm 1fr 47mm; min-height:0; }
   .row { display:grid; border-top:.35mm solid var(--line); min-height:0; }
   .row:first-child { border-top:0; }
-  .cell { padding:2mm 3.6mm; border-left:.35mm solid var(--line); min-width:0; display:flex; flex-direction:column; justify-content:center; }
+  .cell { padding:2mm 3.6mm; border-left:.35mm solid var(--line); min-width:0; min-height:0; overflow:hidden; display:flex; flex-direction:column; justify-content:center; }
+  /* direcciones largas: máximo 2 líneas; datos cortos (N.º de OT, guía, fecha…) en una sola línea; el texto se reduce solo si no cabe */
+  .r1 .sub { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .main.multi .r2 .v, .rs .v, .r4 .v, .rt .item .v { white-space:nowrap; }
+  .band { min-width:0; } .band .tag, .band .contact { min-width:0; overflow:hidden; }
+  .main > .row { overflow:hidden; grid-template-rows:minmax(0, 1fr); }
+  .cell > * { flex-shrink:0; }
+  .sub.vacio { display:none; }  /* línea de dirección/ciudad sin dato: no ocupa espacio */  /* el contenido no se aplasta: si no cabe, se reduce la letra */  /* cada fila respeta su alto: el recuadro no crece sobre la fila de abajo */
   .cell:first-child { border-left:0; }
   .k { font-size:2.3mm; font-weight:700; letter-spacing:.35mm; text-transform:uppercase; color:var(--muted); margin-bottom:.7mm; }
   .v { font-size:4.4mm; font-weight:800; line-height:1.12; overflow-wrap:anywhere; }
@@ -118,7 +125,7 @@
   <button data-size="A4" class="on">A4 horizontal</button>
   <button data-size="A3">A3 horizontal</button>
   <button id="print">Imprimir</button>
-  <span class="hint">Con 1 producto usa el formato de producto único; con varios, la tabla de contenido.</span>
+  <span class="hint">Al imprimir: márgenes <b>Ninguno</b>, escala <b>100 %</b> y activar <b>Gráficos de fondo</b>.</span>
 </div>
 
 <div class="sheet-wrap"><div class="sheet">
@@ -2583,18 +2590,30 @@ function fitTable() {
   box.style.setProperty('--fs', fs + 'mm');
   while (box.scrollHeight > box.clientHeight + 1 && fs > 2.2) { fs -= 0.1; box.style.setProperty('--fs', fs.toFixed(2) + 'mm'); }
 }
+/* reduce la letra de cada recuadro hasta que su contenido quepa (datos largos no se montan sobre otros recuadros) */
+function fitCells() {
+  document.querySelectorAll('.cell, .band .contact, .band .tag, .bulto').forEach(el => {
+    const kids = [...el.children];
+    kids.forEach(k => k.style.zoom = '');
+    el.style.justifyContent = 'flex-start';   // con contenido centrado, el desborde de arriba no se mide
+    let z = 1;
+    const sobra = () => el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1;
+    while (sobra() && z > 0.45) { z = Math.round((z - 0.05) * 100) / 100; kids.forEach(k => k.style.zoom = z); }
+    el.style.justifyContent = '';
+  });
+}
 function setSize(s) {
   s = (s || 'A4').toUpperCase() === 'A3' ? 'A3' : 'A4';
   document.documentElement.style.setProperty('--k', s === 'A3' ? Math.SQRT2 : 1);
   document.getElementById('page-size').textContent = `@page { size: ${s} landscape; margin: 0; }`;
   document.querySelectorAll('.toolbar [data-size]').forEach(b => b.classList.toggle('on', b.dataset.size === s));
-  fitTable();
+  fitTable(); fitCells();
 }
 function render(d) {
   const items = d.items || [];
   d.p = items[0] || {};                                   // producto único (modo un producto)
   document.getElementById('main').className = 'main ' + (items.length <= 1 ? 'single' : 'multi');
-  document.querySelectorAll('[data-f]').forEach(el => { const v = get(d, el.dataset.f); el.textContent = v == null || v === '' ? '—' : v; });
+  document.querySelectorAll('[data-f]').forEach(el => { const v = get(d, el.dataset.f); const vacio = v == null || v === ''; el.textContent = vacio ? '—' : v; el.classList.toggle('vacio', vacio); });
   document.getElementById('items').innerHTML = items.map(i =>
     `<tr><td class="it">${esc(i.item)}</td><td class="desc">${esc(i.descripcion)}</td><td>${esc(i.numeroParte)}</td><td>${esc(i.numeroSerie)}</td><td class="q">${esc(i.cantidad)}</td></tr>`).join('');
   const units = items.reduce((a, i) => a + (+i.cantidad || 0), 0);
@@ -2613,6 +2632,8 @@ const qd = new URLSearchParams(location.search).get('data');
 if (qd) { try { DATA = JSON.parse(decodeURIComponent(escape(atob(qd.replace(/-/g, '+').replace(/_/g, '/'))))); } catch (e) { console.error('data inválida', e); } }
 const size = applyUrl(DATA);
 render(DATA); setSize(size || DATA.tamano);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { fitTable(); fitCells(); });
+window.addEventListener('beforeprint', () => { fitTable(); fitCells(); });
 window.GTORotulo = { render: (d, s) => { render(d); setSize(s || d.tamano); }, setSize, print: () => window.print() };
 document.querySelectorAll('.toolbar [data-size]').forEach(b => b.onclick = () => setSize(b.dataset.size));
 document.getElementById('print').onclick = () => window.print();
