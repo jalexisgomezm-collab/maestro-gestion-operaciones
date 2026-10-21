@@ -672,7 +672,7 @@ async function renderDetalle(id){
     ${esPI ? cabeceraPI(s, O, S, info) : `<div class="detail-head">
       <div><div class="ot-tag mono">${esc(s.numero_orden_trabajo||'')}</div><h1>${esc(s.nombre)}</h1><div class="sub">${esc(s.cliente||'Sin cliente')} · ${esc((s.tipo||'').toLowerCase())} ${s.estado!=='activo'?' · '+esc(s.estado):''}</div>
         <div class="row" style="margin-top:6px">${badge(s.estado_comercial, EST_COM[s.estado_comercial])} ${badge('op', EST_OP[s.estado_operativo])}</div></div>
-      <div class="row"><button id="ficha" title="Ficha de la OT para imprimir o guardar como PDF">🖨 Ficha PDF</button><button id="edit">Editar datos</button><button class="danger" id="del">Eliminar</button></div>
+      <div class="row"><button id="rotulo" title="Rótulo de despacho para el empaque (uno por bulto)">🏷 Rótulo</button><button id="ficha" title="Ficha de la OT para imprimir o guardar como PDF">🖨 Ficha PDF</button><button id="edit">Editar datos</button><button class="danger" id="del">Eliminar</button></div>
     </div>
     <div class="chain">${steps.map((st,i)=>`${i?'<span class="arr">→</span>':''}<div class="step ${st[2]==='dev'?'dev':st[2]?'done':''}"><b>${st[0]}</b>${esc(st[1]||'—')}</div>`).join('')}</div>
     <div class="grid-info">
@@ -695,6 +695,7 @@ async function renderDetalle(id){
       <div id="tab"></div>
     </div>`;
   document.getElementById('edit').onclick = () => editarServicio(s);
+  const btnRot = document.getElementById('rotulo'); if (btnRot) btnRot.onclick = async () => { btnRot.disabled = true; try { await abrirRotulo({ s, C, G, F }); } finally { btnRot.disabled = false; } };
   document.getElementById('ficha').onclick = async (e) => {
     const b = e.currentTarget; b.disabled = true;
     try {
@@ -1165,6 +1166,124 @@ async function renderLabDetalle(id){
   }
 }
 
+// ---------- rótulo de despacho (plantilla /rotulo.html; un rótulo por bulto) ----------
+const ROTULO_PROVEEDOR = { nombre: 'GTO PERÚ S.A.C.', direccion: 'Variante de Uchumayo km 5.5', ciudad: 'Sachaca · Arequipa' };
+const ROTULO_CONTACTO = { area: 'GERENCIA COMERCIAL', nombres: 'IGOR FERNÁNDEZ', telefonos: '+51 937 339 957  /  +51 914 493 884', correo: 'ifernandez@gtoperu.com', direccion: 'Cal. German Schreiber N.º 276 Int. T301, Urb. Santa Ana · San Isidro, Lima' };
+const TIPOS_REF = ['SOLPED', 'REQUERIMIENTO', 'PEDIDO', 'LICITACION', 'LICITACIÓN', 'OC', 'OS', 'CONTRATO'];
+const fechaDMY = (d) => { const x = String(d || '').slice(0, 10).split('-'); return x.length === 3 ? `${x[2]}/${x[1]}/${x[0]}` : ''; };
+const b64url = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const urlRotulo = (datos) => `/rotulo.html?data=${b64url(datos)}`;
+function separarReferencia(ref){
+  const t = String(ref || '').trim(); if (!t) return { tipo: '', numero: '' };
+  const m = t.match(/^([A-Za-zÁÉÍÓÚáéíóú.]+)\s*[:#Nº°.\-]*\s*(.+)$/);
+  if (m && TIPOS_REF.includes(m[1].toUpperCase().replace(/\./g, ''))) return { tipo: m[1].toUpperCase().replace(/\./g, ''), numero: m[2].trim() };
+  return { tipo: 'REFERENCIA', numero: t };
+}
+async function abrirRotulo({ s, C, G, F }){
+  const prev = (await sb.from('proyecto_rotulos').select('*').eq('proyecto_id', s.id).order('created_at', { ascending: false })).data || [];
+  const ult = prev[0]?.datos || null;
+  // datos del cotizador: dirección del cliente y referencia (SOLPED / licitación) de la cotización
+  let cli = null, ref = { tipo: '', numero: '' };
+  try {
+    const { clientes, cotizaciones } = await listasCotizador();
+    const norm = (x) => String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    cli = clientes.find(c => norm(c.razon_social) === norm(s.cliente)) || null;
+    const q = s.numero_cotizacion ? cotizaciones.find(x => x.numero === String(s.numero_cotizacion).trim()) : null;
+    if (q?.referencia) ref = separarReferencia(q.referencia);
+  } catch {}
+  const gsal = [...G].filter(g => g.tipo === 'SALIDA').sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))[0] || null;
+  const facts = F.filter(f => f.estado_cobro !== 'ANULADA').map(f => f.numero_factura).filter(Boolean).join(', ');
+  const base = {
+    tamano: ult?.tamano || 'A4',
+    cliente: { nombre: s.cliente || ult?.cliente?.nombre || '', direccion: ult?.cliente?.direccion || cli?.direccion || '', ciudad: ult?.cliente?.ciudad || '' },
+    destinoFinal: ult?.destinoFinal || '',
+    referencia: { tipo: ult?.referencia?.tipo || ref.tipo, numero: ult?.referencia?.numero || ref.numero, detalle: ult?.referencia?.detalle || (ref.numero ? 'Pedido / requerimiento del cliente' : '') },
+    ordenCompra: s.numero_oc_cliente || ult?.ordenCompra || '',
+    factura: facts || ult?.factura || '',
+    guia: gsal?.numero_guia || ult?.guia || '',
+    fecha: gsal?.fecha ? fechaDMY(gsal.fecha) : fechaDMY(new Date().toISOString()),
+    bulto: { actual: ult ? String(Math.min((+ult.bulto?.actual || 0) + 1, +ult.bulto?.total || 99)).padStart(2, '0') : '01', total: ult?.bulto?.total || '01', tipo: ult?.bulto?.tipo || 'Cajas' },
+    peso: '', dimensiones: ult?.dimensiones || '', preparadoPor: ult?.preparadoPor || 'Almacén GTO',
+    contacto: { ...ROTULO_CONTACTO, ...(ult?.contacto || {}) },
+  };
+  const yaEnBultos = new Set(prev.flatMap(r => (r.datos?.items || []).map(i => i._cid)).filter(Boolean));
+  const inp = (n, v, ph = '', extra = '') => `<input name="${n}" value="${esc(v ?? '')}" placeholder="${esc(ph)}" ${extra}>`;
+  const lab = (t, html, full = false) => `<label class="f ${full ? 'full' : ''}"><span>${t}</span>${html}</label>`;
+  $modal.innerHTML = `<div class="ov"><form class="modal" novalidate style="max-width:860px">
+    <header><h2>Rótulo de despacho · <span class="mono">${esc(s.numero_orden_trabajo || '')}</span></h2><button type="button" class="link" data-x>✕</button></header>
+    <div class="body">
+      ${prev.length ? `<div class="small" style="margin-bottom:10px"><b>Rótulos generados:</b> ${prev.map(r => `<span style="white-space:nowrap">Bulto ${esc(r.datos?.bulto?.actual || r.bulto_actual || '')}/${esc(r.datos?.bulto?.total || r.bulto_total || '')} · ${fdate(r.created_at)} <a href="${esc(urlRotulo(r.datos))}" target="_blank" rel="noopener">Reimprimir</a> <button type="button" class="link sm danger" data-rdel="${r.id}" title="Quitar del historial">✕</button></span>`).join(' &nbsp;·&nbsp; ')}</div>` : ''}
+      <div class="fgrid">
+        <div class="fsec">Bulto</div>
+        ${lab('Bulto N°', inp('b_actual', base.bulto.actual, '01'))}
+        ${lab('De un total de', inp('b_total', base.bulto.total, '01'))}
+        ${lab('Tipo de bulto', inp('b_tipo', base.bulto.tipo, 'Cajas', 'list="dl-btipo"') + '<datalist id="dl-btipo"><option>Cajas</option><option>Caja de madera</option><option>Jabas</option><option>Pallets</option><option>Sobre</option></datalist>')}
+        ${lab('Peso (kg)', inp('peso', base.peso, 'Ej. 90', 'inputmode="decimal"'))}
+        ${lab('Dimensiones (cm) largo × ancho × alto', inp('dims', base.dimensiones, '84 × 68 × 67'))}
+        ${lab('Preparado por', inp('prep', base.preparadoPor))}
+        ${lab('Tamaño de hoja', `<select name="tamano"><option value="A4" ${base.tamano === 'A4' ? 'selected' : ''}>A4 horizontal</option><option value="A3" ${base.tamano === 'A3' ? 'selected' : ''}>A3 horizontal</option></select>`)}
+        <div class="fsec">Productos en este bulto</div>
+        <div class="full" style="grid-column:1/-1">${C.length ? `<div class="tbl-wrap"><table><thead><tr><th></th><th>Descripción</th><th>N° parte</th><th>N° serie</th><th style="width:80px">Cant.</th></tr></thead><tbody>
+          ${C.map(c => `<tr><td><input type="checkbox" data-ci="${c.id}" ${yaEnBultos.has(c.id) ? '' : 'checked'} style="width:auto"></td><td>${esc(c.descripcion)}${yaEnBultos.has(c.id) ? ' <span class="small">(ya rotulado)</span>' : ''}</td><td class="mono small">${esc(c.numero_parte || '—')}</td><td class="mono small">${esc(c.numero_serie || '—')}</td><td><input data-cq="${c.id}" value="${esc(c.cantidad ?? 1)}" style="width:70px"></td></tr>`).join('')}
+          </tbody></table></div><div class="small" style="margin-top:4px">1 producto marcado = formato de producto único; 2 o más = tabla de contenido del bulto.</div>` : '<div class="err">Esta OT no tiene componentes. Agrégalos en la pestaña Componentes (descripción, N° de parte y N° de serie).</div>'}</div>
+        <div class="fsec">Destino y documentos</div>
+        ${lab('Cliente', inp('c_nom', base.cliente.nombre))}
+        ${lab('Dirección del cliente', inp('c_dir', base.cliente.direccion, cli ? '' : 'No figura en el cotizador'))}
+        ${lab('Ciudad / distrito', inp('c_ciu', base.cliente.ciudad, 'Ej. San Juan de Marcona'))}
+        ${lab('Destino final / unidad', inp('destino', base.destinoFinal, 'Ej. San Nicolás'))}
+        ${lab('Referencia (tipo)', inp('r_tipo', base.referencia.tipo, 'SOLPED', 'list="dl-rtipo"') + `<datalist id="dl-rtipo">${TIPOS_REF.filter(t => t !== 'LICITACIÓN').map(t => `<option>${t}</option>`).join('')}</datalist>`)}
+        ${lab('Referencia (N°)', inp('r_num', base.referencia.numero))}
+        ${lab('Referencia (detalle)', inp('r_det', base.referencia.detalle, 'Pedido / requerimiento del cliente'))}
+        ${lab('Orden de compra del cliente', inp('oc', base.ordenCompra))}
+        ${lab('Factura', inp('fac', base.factura, 'Solo sale en el formato de varios productos'))}
+        ${lab('Guía de remisión', inp('guia', base.guia, 'EG07-…'))}
+        ${lab('Fecha de despacho', inp('fecha', base.fecha, 'dd/mm/aaaa'))}
+      </div>
+      <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Contacto que figura en el rótulo (${esc(base.contacto.area)} · ${esc(base.contacto.nombres)})</summary>
+        <div class="fgrid" style="margin-top:8px">
+          ${lab('Área', inp('k_area', base.contacto.area))}${lab('Nombre', inp('k_nom', base.contacto.nombres))}
+          ${lab('Teléfonos', inp('k_tel', base.contacto.telefonos))}${lab('Correo', inp('k_mail', base.contacto.correo))}
+          ${lab('Dirección', inp('k_dir', base.contacto.direccion), true)}
+        </div></details>
+      <div class="err" hidden></div>
+    </div>
+    <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">Guardar e imprimir rótulo</button></footer></form></div>`;
+  const form = $modal.querySelector('form');
+  const fin = () => { $modal.innerHTML = ''; };
+  $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = fin);
+  const showErr = (m) => { const e = form.querySelector('.err'); e.hidden = false; e.textContent = m; };
+  $modal.querySelectorAll('[data-rdel]').forEach(b => b.onclick = async () => {
+    if (!confirm('¿Quitar este rótulo del historial?')) return;
+    const { error } = await sb.from('proyecto_rotulos').delete().eq('id', b.dataset.rdel);
+    if (error) return toast(error.message); b.parentElement.remove(); toast('Rótulo quitado del historial');
+  });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const v = (n) => (form.elements[n]?.value || '').trim();
+    const sel = C.filter(c => form.querySelector(`[data-ci="${c.id}"]`)?.checked);
+    if (!sel.length) return showErr('Marca al menos un producto para este bulto.');
+    const pad = (x) => String(x).padStart(2, '0');
+    const datos = {
+      ot: s.numero_orden_trabajo || '', tamano: v('tamano') || 'A4',
+      proveedor: ROTULO_PROVEEDOR,
+      cliente: { nombre: v('c_nom'), direccion: v('c_dir'), ciudad: v('c_ciu') },
+      destinoFinal: v('destino'),
+      referencia: { tipo: v('r_tipo'), numero: v('r_num'), detalle: v('r_det') },
+      ordenCompra: v('oc'), factura: v('fac'), guia: v('guia'), fecha: v('fecha'),
+      items: sel.map((c, i) => ({ item: pad(i + 1), descripcion: c.descripcion || '', numeroParte: c.numero_parte || '', numeroSerie: c.numero_serie || '', cantidad: form.querySelector(`[data-cq="${c.id}"]`)?.value.trim() || String(c.cantidad ?? 1), _cid: c.id })),
+      bulto: { actual: pad(v('b_actual') || '1'), total: pad(v('b_total') || '1'), tipo: v('b_tipo') },
+      peso: v('peso'), dimensiones: v('dims'), preparadoPor: v('prep'),
+      contacto: { area: v('k_area'), nombres: v('k_nom'), telefonos: v('k_tel'), correo: v('k_mail'), direccion: v('k_dir') },
+    };
+    const w = window.open('about:blank', '_blank');  // se abre ya (si se espera al guardado, el navegador lo bloquea)
+    const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+    const { error } = await sb.from('proyecto_rotulos').insert({ proyecto_id: s.id, bulto_actual: +datos.bulto.actual || null, bulto_total: +datos.bulto.total || null, datos });
+    if (error) { if (w) w.close(); btn.disabled = false; return showErr(error.message); }
+    if (w) w.location.href = urlRotulo(datos); else location.href = urlRotulo(datos);
+    fin(); toast(`Rótulo del bulto ${datos.bulto.actual}/${datos.bulto.total} generado`);
+  };
+}
+
 // ---------- router ----------
 async function route(){
   $modal.innerHTML = ''; document.onkeydown = null;  // cerrar ventanas abiertas al cambiar de página
@@ -1172,6 +1291,15 @@ async function route(){
   if (!MODO) {
     const r = await sb.rpc('acceso_maestro'); MODO = r.error ? 'total' : (r.data || 'ninguno');
     if (MODO === 'laboratorio') { const g = await sb.rpc('ve_guias'); VE_GUIAS = g.data === true; }
+  }
+  // QR del rótulo: #/ot/OT-2026-0003 -> ficha de la OT
+  const mo = location.hash.match(/^#\/ot\/(.+)$/);
+  if (mo) {
+    const num = decodeURIComponent(mo[1]).trim();
+    const r = LAB() ? await sb.rpc('lab_servicios').select('id').eq('numero_orden_trabajo', num).maybeSingle()
+                    : await sb.from('proyectos_maestro').select('id').eq('numero_orden_trabajo', num).maybeSingle();
+    if (r.data?.id) { location.replace(`#/servicio/${r.data.id}`); return; }
+    toast(`No se encontró la OT ${num}`); location.replace('#/'); return;
   }
   const m = location.hash.match(/^#\/servicio\/([0-9a-f-]{36})/);
   if (LAB()) {
