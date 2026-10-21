@@ -129,7 +129,7 @@ function filaInforme(i, urls, { conOT = true, enOT = false } = {}){
 }
 async function listaProyectosSimple(){
   if (LAB()) { const { data } = await sb.rpc('lab_servicios').select('id,numero_orden_trabajo,nombre,cliente,clase,estado').order('numero_orden_trabajo', { ascending:false }); return data || []; }
-  const { data } = await sb.from('proyectos').select('id,numero_orden_trabajo,nombre,cliente,numero_cotizacion,clase,estado').order('numero_orden_trabajo', { ascending:false });
+  const { data } = await sb.from('proyectos_maestro').select('id,numero_orden_trabajo,nombre,cliente,numero_cotizacion,clase,estado').order('numero_orden_trabajo', { ascending:false });
   return data || [];
 }
 async function subirArchivosInforme(informeId, files, prog){
@@ -278,7 +278,7 @@ const ETIQUETAS = { EST_COM, EST_OP, EST_COBRO, TIPOS_PI };
 const FONDO = () => location.origin + '/membrete-gto.jpg';
 async function datosReporte(){
   const [pr, fa, co, gu, oc, so, inf] = await Promise.all([
-    sb.from('proyectos').select('*').order('numero_orden_trabajo', { ascending:true }),
+    sb.from('proyectos_maestro').select('*').order('numero_orden_trabajo', { ascending:true }),
     sb.from('proyecto_facturas').select('proyecto_id,numero_factura,fecha_emision,fecha_vencimiento,monto,monto_cobrado,estado_cobro,moneda,fecha_cobro'),
     sb.from('proyecto_componentes').select('proyecto_id'),
     sb.from('proyecto_guias').select('proyecto_id,tipo,numero_guia,fecha'),
@@ -295,7 +295,7 @@ async function renderLista(){
   $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
   const esPI = filtro.clase === 'INTERNO';
   const [pr, fa, co, gu, oc, so, inf] = await Promise.all([
-    sb.from('proyectos').select('*').order('created_at', { ascending:false }),
+    sb.from('proyectos_maestro').select('*').order('created_at', { ascending:false }),
     sb.from('proyecto_facturas').select('proyecto_id,monto,monto_cobrado,estado_cobro,moneda'),
     sb.from('proyecto_componentes').select('proyecto_id'),
     sb.from('proyecto_guias').select('proyecto_id,tipo'),
@@ -624,7 +624,7 @@ let tabActual = 'componentes';
 async function renderDetalle(id){
   $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
   const [p, comp, guias, facts, ocs, sols, arch, infs] = await Promise.all([
-    sb.from('proyectos').select('*').eq('id', id).single(),
+    sb.from('proyectos_maestro').select('*').eq('id', id).single(),
     sb.from('proyecto_componentes').select('*').eq('proyecto_id', id).order('created_at'),
     sb.from('proyecto_guias').select('*').eq('proyecto_id', id).order('fecha'),
     sb.from('proyecto_facturas').select('*').eq('proyecto_id', id).order('fecha_emision'),
