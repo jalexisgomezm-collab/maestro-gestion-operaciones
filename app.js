@@ -96,43 +96,212 @@ function renderLogin(){
 function shell(inner){
   return `<header class="top"><a href="#/" class="brand" style="color:#fff">GTO PERU · <span>Maestro de Gestión</span></a>
     <div class="sp"></div>
+    <a href="#/informes" style="color:#fff;font-size:13px;font-weight:500">Informes técnicos</a>
     <a href="${OC_APP}" target="_blank" rel="noopener" style="color:#cbd5e1;font-size:13px">Sistema OC ↗</a>
     <span class="user">${esc(session?.user?.email)}</span>
     <button class="sm" id="logout">Salir</button></header><main>${inner}</main>`;
 }
 function bindShell(){ const b=document.getElementById('logout'); if(b) b.onclick = () => sb.auth.signOut(); }
 
+// ---------- informes técnicos (módulo con correlativo IT-AAAA-NNNN / GAR-AAAA-NNNN) ----------
+const TIPOS_INF = { INICIAL:'Inicial', AVANCE:'Avance', FINAL:'Final', GARANTIA:'Garantía', OTRO:'Otro' };
+const ACEPTA_INF = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*';
+const archivosInf = (i) => [...(i.informe_archivos || [])].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+function enlacesInforme(i, urls){
+  const l = archivosInf(i);
+  if (!l.length) return '<span class="small">Sin archivo</span>';
+  return l.map(a => urls[a.storage_path] ? `<a class="link-sm" href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}"${esWord(a) ? ` download="${esc(a.nombre)}"` : ''}><span class="doc-tag ${esWord(a)?'w':'p'}">${tipoDoc(a)}</span></a>` : '').join(' ');
+}
+function filaInforme(i, urls, { conOT = true, enOT = false } = {}){
+  return `<tr>
+    <td class="mono" style="font-weight:500;white-space:nowrap">${esc(i.numero || '—')}</td>
+    <td>${badge('op', TIPOS_INF[i.tipo] || i.tipo)}</td>
+    <td><div style="font-weight:500">${esc(i.titulo)}</div>${i.observaciones ? `<div class="small">${esc(i.observaciones)}</div>` : ''}</td>
+    <td style="white-space:nowrap">${fdate(i.fecha)}</td>
+    ${conOT ? `<td>${i.proyectos ? `<a href="#/servicio/${i.proyecto_id}" class="mono">${esc(i.proyectos.numero_orden_trabajo || '')}</a><div class="small">${esc(i.cliente || '')}</div>` : `<span class="small">Sin OT</span>${i.cliente ? `<div class="small">${esc(i.cliente)}</div>` : ''}`}</td>` : ''}
+    <td class="mono">${esc(i.numero_cotizacion || '—')}</td>
+    <td style="white-space:nowrap">${enlacesInforme(i, urls)}</td>
+    <td style="white-space:nowrap;text-align:right"><button class="link sm" data-inf-e="${i.id}">Editar</button>${enOT ? `<button class="link sm" data-inf-q="${i.id}" title="Desvincular de esta OT (el informe no se borra)">Quitar de la OT</button>` : `<button class="link sm danger" data-inf-d="${i.id}">Eliminar</button>`}</td></tr>`;
+}
+async function listaProyectosSimple(){
+  const { data } = await sb.from('proyectos').select('id,numero_orden_trabajo,nombre,cliente,numero_cotizacion,clase,estado').order('numero_orden_trabajo', { ascending:false });
+  return data || [];
+}
+async function subirArchivosInforme(informeId, files, prog){
+  const errs = [];
+  for (let k = 0; k < files.length; k++) {
+    if (prog) prog.textContent = `Subiendo archivo ${k+1} de ${files.length}…`;
+    let f = files[k];
+    if (!f.type) { const ext = (f.name.split('.').pop() || '').toLowerCase(); if (MIME_EXT[ext]) f = new File([f], f.name, { type: MIME_EXT[ext] }); }
+    if (!/pdf|msword|wordprocessingml|^image\//.test(f.type)) { errs.push(`${f.name}: debe ser PDF, Word o imagen`); continue; }
+    if (f.size > 25*1024*1024) { errs.push(`${f.name}: supera 25 MB`); continue; }
+    const path = `informes/${informeId}/${Date.now()}_${k}_${limpiarNombre(f.name)}`;
+    const up = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
+    if (up.error) { errs.push(`${f.name}: ${up.error.message}`); continue; }
+    const ins = await sb.from('informe_archivos').insert({ informe_id: informeId, storage_path: path, nombre: f.name, mime: f.type, tamano: f.size });
+    if (ins.error) { await sb.storage.from(BUCKET).remove([path]); errs.push(`${f.name}: ${ins.error.message}`); }
+  }
+  return errs;
+}
+async function quitarArchivoInforme(a){
+  await sb.storage.from(BUCKET).remove([a.storage_path]);
+  await sb.from('proyecto_archivos').delete().eq('storage_path', a.storage_path); // copia antigua (informes subidos antes del módulo)
+  return chk(await sb.from('informe_archivos').delete().eq('id', a.id));
+}
+async function eliminarInforme(i){
+  if (!await confirmModal(`¿Eliminar el informe ${i.numero} y sus ${archivosInf(i).length} archivo(s)? No se puede recuperar. (El número no se reutiliza.)`)) return false;
+  const l = archivosInf(i);
+  if (l.length) { await sb.storage.from(BUCKET).remove(l.map(a => a.storage_path)); await sb.from('proyecto_archivos').delete().in('storage_path', l.map(a => a.storage_path)); }
+  const { error } = await sb.from('informes_tecnicos').delete().eq('id', i.id);
+  if (error) { toast(error.message); return false; }
+  toast(`Informe ${i.numero} eliminado`); return true;
+}
+// Registrar / editar un informe. opts.proyectoId: OT preseleccionada.
+function editarInforme(inf = null, opts = {}){
+  return new Promise(async resolve => {
+    const proys = await listaProyectosSimple();
+    const ot = inf?.proyecto_id || opts.proyectoId || '';
+    const hoy = new Date().toISOString().slice(0,10);
+    const urls = inf ? await firmarUrls(archivosInf(inf)) : {};
+    $modal.innerHTML = `<div class="ov"><form class="modal" novalidate style="max-width:720px">
+      <header><h2>${inf ? `Editar informe <span class="mono">${esc(inf.numero)}</span>` : 'Nuevo informe técnico'}</h2><button type="button" class="link" data-x>✕</button></header>
+      <div class="body"><div class="fgrid">
+        <label class="f"><span>Tipo de informe</span><select name="tipo">${Object.entries(TIPOS_INF).map(([k,l]) => `<option value="${k}" ${(inf?.tipo || 'FINAL') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="f"><span>Fecha del informe</span><input type="date" name="fecha" value="${esc(inf?.fecha || hoy)}"></label>
+        <label class="f full"><span>Título *</span><input name="titulo" required value="${esc(inf?.titulo || '')}" placeholder="Ej. Informe técnico final – reparación de variador ACS800"></label>
+        <label class="f full"><span>Orden de trabajo (OT / PI)</span><select name="proyecto_id"><option value="">— Sin OT por ahora —</option>${proys.map(p => `<option value="${p.id}" ${p.id === ot ? 'selected' : ''}>${esc(p.numero_orden_trabajo || '')} · ${esc(p.nombre || '')}${p.cliente ? ' · ' + esc(p.cliente) : ''}${p.estado !== 'activo' ? ` (${esc(p.estado)})` : ''}</option>`).join('')}</select></label>
+        <label class="f"><span>N° de cotización</span><input name="numero_cotizacion" list="dl-inf-cot" autocomplete="off" value="${esc(inf?.numero_cotizacion || '')}" placeholder="Se toma de la OT o elige del cotizador"><datalist id="dl-inf-cot"></datalist></label>
+        <label class="f"><span>Cliente</span><input name="cliente" list="dl-inf-cli" autocomplete="off" value="${esc(inf?.cliente || '')}"><datalist id="dl-inf-cli"></datalist></label>
+        <label class="f"><span>Responsable / elaborado por</span><input name="responsable" value="${esc(inf?.responsable || '')}"></label>
+        <label class="f"><span>${inf ? 'Agregar archivos' : 'Archivos del informe'} (PDF, Word o imagen)</span><input type="file" name="f" multiple accept="${ACEPTA_INF}"></label>
+        <label class="f full"><span>Observaciones</span><textarea name="observaciones" rows="2">${esc(inf?.observaciones || '')}</textarea></label>
+      </div>
+      ${inf && archivosInf(inf).length ? `<div class="small" style="margin-top:6px"><b>Archivos actuales:</b> ${archivosInf(inf).map(a => `<span style="white-space:nowrap">${urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${esc(a.nombre)}</a>` : esc(a.nombre)} <button type="button" class="link sm danger" data-rmf="${a.id}" title="Quitar este archivo">✕</button></span>`).join(' · ')}</div>` : ''}
+      <p class="small" style="margin-top:8px">${inf ? 'El número del informe no cambia.' : 'El <b>número</b> se asigna solo al guardar: <b>IT-AAAA-NNNN</b> (garantías: <b>GAR-AAAA-NNNN</b>), continuando la numeración usada.'}</p>
+      <div class="prog small"></div><div class="err" hidden></div></div>
+      <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">${inf ? 'Guardar cambios' : 'Registrar informe'}</button></footer></form></div>`;
+    const form = $modal.querySelector('form');
+    const fin = (v) => { $modal.innerHTML = ''; resolve(v); };
+    $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = () => fin(false));
+    const showErr = (m) => { const e = form.querySelector('.err'); e.hidden = false; e.innerHTML = esc(m).replace(/\n/g, '<br>'); };
+    // al elegir la OT se completan cotización y cliente (si están vacíos)
+    form.proyecto_id.onchange = () => {
+      const p = proys.find(x => x.id === form.proyecto_id.value); if (!p) return;
+      if (!form.numero_cotizacion.value.trim() && p.numero_cotizacion) form.numero_cotizacion.value = p.numero_cotizacion;
+      if (!form.cliente.value.trim() && p.cliente) form.cliente.value = p.cliente;
+    };
+    if (!inf && ot) form.proyecto_id.onchange();
+    listasCotizador().then(({ clientes, cotizaciones }) => {
+      if (!form.isConnected) return;
+      document.getElementById('dl-inf-cot').innerHTML = cotizaciones.map(q => `<option value="${esc(q.numero)}">${esc([q.cliente, q.referencia].filter(Boolean).join(' · '))}</option>`).join('');
+      document.getElementById('dl-inf-cli').innerHTML = clientes.map(c => `<option value="${esc(c.razon_social)}"></option>`).join('');
+      form.numero_cotizacion.addEventListener('change', () => { const q = cotizaciones.find(x => x.numero === form.numero_cotizacion.value.trim()); if (q && !form.cliente.value.trim()) form.cliente.value = q.cliente || ''; });
+    }).catch(() => {});
+    $modal.querySelectorAll('[data-rmf]').forEach(b => b.onclick = async () => {
+      const a = archivosInf(inf).find(x => x.id === b.dataset.rmf); if (!a) return;
+      if (!confirm(`¿Quitar el archivo "${a.nombre}"? No se puede recuperar.`)) return;
+      try { await quitarArchivoInforme(a); inf.informe_archivos = inf.informe_archivos.filter(x => x.id !== a.id); b.parentElement.remove(); toast('Archivo quitado'); } catch (e) { showErr(e.message); }
+    });
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const d = { tipo: form.tipo.value, fecha: form.fecha.value || hoy, titulo: form.titulo.value.trim(), proyecto_id: form.proyecto_id.value || null,
+        numero_cotizacion: val(form.numero_cotizacion.value.trim()), cliente: val(form.cliente.value.trim()), responsable: val(form.responsable.value.trim()), observaciones: val(form.observaciones.value.trim()) };
+      if (!d.titulo) return showErr('Escribe el título del informe');
+      const files = [...form.f.files];
+      const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+      try {
+        const r = inf ? chk(await sb.from('informes_tecnicos').update(d).eq('id', inf.id).select('id,numero').single())
+                      : chk(await sb.from('informes_tecnicos').insert(d).select('id,numero').single());
+        const errs = files.length ? await subirArchivosInforme(r.id, files, form.querySelector('.prog')) : [];
+        if (errs.length) { showErr(`Informe ${r.numero} guardado, pero hubo problemas con algunos archivos:\n${errs.join('\n')}`); btn.textContent = 'Cerrar'; btn.disabled = false; btn.onclick = (ev) => { ev.preventDefault(); fin(true); }; return; }
+        toast(inf ? `Informe ${r.numero} actualizado` : `Informe ${r.numero} registrado`); fin(true);
+      } catch (err) { showErr(err.message); btn.disabled = false; }
+    };
+  });
+}
+async function cargarInformes(filtro = {}){
+  let q = sb.from('informes_tecnicos').select('*, informe_archivos(*), proyectos(numero_orden_trabajo,nombre,clase)').order('numero', { ascending:false });
+  if (filtro.proyectoId) q = q.eq('proyecto_id', filtro.proyectoId);
+  if (filtro.sinOT) q = q.is('proyecto_id', null);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+function bindFilasInforme(cont, lista, reload, proyectoId = null){
+  cont.querySelectorAll('[data-inf-e]').forEach(b => b.onclick = async () => { const i = lista.find(x => x.id === b.dataset.infE); if (i && await editarInforme(i)) reload(); });
+  cont.querySelectorAll('[data-inf-d]').forEach(b => b.onclick = async () => { const i = lista.find(x => x.id === b.dataset.infD); if (i && await eliminarInforme(i)) reload(); });
+  cont.querySelectorAll('[data-inf-q]').forEach(b => b.onclick = async () => {
+    const i = lista.find(x => x.id === b.dataset.infQ); if (!i) return;
+    if (!await confirmModal(`¿Quitar el informe ${i.numero} de esta OT? El informe sigue registrado en el módulo de informes.`)) return;
+    const { error } = await sb.from('informes_tecnicos').update({ proyecto_id: null }).eq('id', i.id); error ? toast(error.message) : reload();
+  });
+}
+let filtroInf = { q: '', tipo: 'TODOS' };
+async function renderInformes(){
+  $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
+  let lista;
+  try { lista = await cargarInformes(); } catch (e) { $app.querySelector('main').innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const urls = await firmarUrls(lista.flatMap(archivosInf));
+  const q = filtroInf.q.toLowerCase();
+  const rows = lista.filter(i => (filtroInf.tipo === 'TODOS' || i.tipo === filtroInf.tipo) &&
+    (!q || [i.numero, i.titulo, i.cliente, i.numero_cotizacion, i.responsable, i.proyectos?.numero_orden_trabajo, i.proyectos?.nombre].some(x => (x || '').toLowerCase().includes(q))));
+  const anio = new Date().getFullYear();
+  const kpi = (n, l) => `<div class="kpi" style="cursor:default"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  $app.querySelector('main').innerHTML = `
+    <div class="row" style="justify-content:space-between">
+      <div><h1>Informes técnicos</h1><div class="sub">Registro de todos los informes con su número correlativo, vinculados a la OT y a la cotización.</div></div>
+      <button class="pri" id="inf-nuevo">+ Nuevo informe</button>
+    </div>
+    <div class="kpis">${kpi(lista.length, 'Informes registrados')}${kpi(lista.filter(i => String(i.fecha || '').startsWith(String(anio))).length, `Del ${anio}`)}${kpi(lista.filter(i => !i.proyecto_id).length, 'Sin OT vinculada')}${kpi(lista.filter(i => !archivosInf(i).length).length, 'Sin archivo')}</div>
+    <div class="panel">
+      <div class="toolbar">
+        <input type="search" id="inf-q" placeholder="Buscar N°, título, cliente, OT o cotización…" value="${esc(filtroInf.q)}">
+        <select id="inf-tipo"><option value="TODOS">Todos los tipos</option>${Object.entries(TIPOS_INF).map(([k,l]) => `<option value="${k}" ${filtroInf.tipo===k?'selected':''}>${l}</option>`).join('')}</select>
+        <div style="flex:1"></div><span class="small">${rows.length} informe(s)</span>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>N° informe</th><th>Tipo</th><th>Título</th><th>Fecha</th><th>OT / cliente</th><th>Cotización</th><th>Archivos</th><th></th></tr></thead>
+      <tbody>${rows.map(i => filaInforme(i, urls)).join('') || '<tr><td colspan="8" class="empty">No hay informes con este filtro.</td></tr>'}</tbody></table></div>
+    </div>`;
+  document.getElementById('inf-nuevo').onclick = async () => { if (await editarInforme()) renderInformes(); };
+  document.getElementById('inf-q').oninput = (e) => { filtroInf.q = e.target.value; clearTimeout(window._iq); window._iq = setTimeout(() => renderInformes().then(() => { const i = document.getElementById('inf-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
+  document.getElementById('inf-tipo').onchange = (e) => { filtroInf.tipo = e.target.value; renderInformes(); };
+  bindFilasInforme($app, lista, renderInformes);
+}
+
 // ---------- reportes ----------
 const ETIQUETAS = { EST_COM, EST_OP, EST_COBRO, TIPOS_PI };
 const FONDO = () => location.origin + '/membrete-gto.jpg';
 async function datosReporte(){
-  const [pr, fa, co, gu, oc, so] = await Promise.all([
+  const [pr, fa, co, gu, oc, so, inf] = await Promise.all([
     sb.from('proyectos').select('*').order('numero_orden_trabajo', { ascending:true }),
     sb.from('proyecto_facturas').select('proyecto_id,numero_factura,fecha_emision,fecha_vencimiento,monto,monto_cobrado,estado_cobro,moneda,fecha_cobro'),
     sb.from('proyecto_componentes').select('proyecto_id'),
     sb.from('proyecto_guias').select('proyecto_id,tipo,numero_guia,fecha'),
     sb.from('ordenes_compra').select('proyecto_id,numero,total,moneda,estado').not('proyecto_id','is',null),
     sb.from('solicitudes_pedido').select('proyecto_id').not('proyecto_id','is',null),
+    sb.from('informes_tecnicos').select('proyecto_id,numero,titulo').not('proyecto_id','is',null).order('numero'),
   ]);
   if (pr.error) throw new Error(pr.error.message);
-  return { P: pr.data || [], F: fa.data || [], C: co.data || [], G: gu.data || [], O: oc.data || [], S: so.data || [], etiquetas: ETIQUETAS, fondo: FONDO(), logo: location.origin + '/logo-gto.png' };
+  return { P: pr.data || [], F: fa.data || [], C: co.data || [], G: gu.data || [], O: oc.data || [], S: so.data || [], I: inf.data || [], etiquetas: ETIQUETAS, fondo: FONDO(), logo: location.origin + '/logo-gto.png' };
 }
 
 // ---------- lista ----------
 async function renderLista(){
   $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
   const esPI = filtro.clase === 'INTERNO';
-  const [pr, fa, co, gu, oc, so] = await Promise.all([
+  const [pr, fa, co, gu, oc, so, inf] = await Promise.all([
     sb.from('proyectos').select('*').order('created_at', { ascending:false }),
     sb.from('proyecto_facturas').select('proyecto_id,monto,monto_cobrado,estado_cobro,moneda'),
     sb.from('proyecto_componentes').select('proyecto_id'),
     sb.from('proyecto_guias').select('proyecto_id,tipo'),
     sb.from('ordenes_compra').select('proyecto_id,total,moneda,estado').not('proyecto_id','is',null),
     sb.from('solicitudes_pedido').select('proyecto_id').not('proyecto_id','is',null),
+    sb.from('informes_tecnicos').select('proyecto_id,numero').not('proyecto_id','is',null).order('numero'),
   ]);
   if (pr.error) { $app.querySelector('main').innerHTML = `<div class="err">${esc(pr.error.message)}</div>`; return; }
   const by = (arr) => (arr.data||[]).reduce((m,r)=>{(m[r.proyecto_id] ||= []).push(r); return m;}, {});
-  const F=by(fa), C=by(co), G=by(gu), O=by(oc), S=by(so);
+  const F=by(fa), C=by(co), G=by(gu), O=by(oc), S=by(so), IN=by(inf);
+  const numInf = (p) => (IN[p.id]||[]).map(i => i.numero).join(', ') || p.numero_informe || '';
   const deClase = pr.data.filter(p => (p.clase || 'SERVICIO') === filtro.clase);
   const nSrv = pr.data.filter(p => (p.clase || 'SERVICIO') === 'SERVICIO' && p.estado === 'activo').length;
   const nPI = pr.data.filter(p => p.clase === 'INTERNO' && p.estado === 'activo').length;
@@ -142,7 +311,7 @@ async function renderLista(){
   const rows = deClase.filter(p =>
     (filtro.verCerrados || p.estado === 'activo') &&
     (filtro.estado === 'TODOS' || p[campoEstado] === filtro.estado) &&
-    (!q || [p.nombre,p.cliente,p.responsable,p.numero_oc_cliente,p.numero_orden_trabajo,p.numero_cotizacion,p.numero_informe,p.descripcion].some(x => (x||'').toLowerCase().includes(q))));
+    (!q || [p.nombre,p.cliente,p.responsable,p.numero_oc_cliente,p.numero_orden_trabajo,p.numero_cotizacion,numInf(p),p.descripcion].some(x => (x||'').toLowerCase().includes(q))));
   const kpi = (k, n, l) => `<div class="kpi ${filtro.estado===k?'sel':''}" data-k="${k}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   const count = (campo, k) => activos.filter(p => p[campo] === k).length;
   const switcher = `<div class="seg"><button data-clase="SERVICIO" class="${!esPI?'on':''}">Servicios a clientes · OT <span class="cnt">${nSrv}</span></button><button data-clase="INTERNO" class="${esPI?'on':''}">Proyectos internos · PI <span class="cnt">${nPI}</span></button></div>`;
@@ -176,7 +345,7 @@ async function renderLista(){
         <td>${badge(p.estado_comercial, EST_COM[p.estado_comercial])}<div style="margin-top:4px">${badge('op', EST_OP[p.estado_operativo])}</div></td>
         <td class="mono">${esc(p.numero_oc_cliente||'—')}</td>
         <td class="mono">${esc(p.numero_cotizacion||'—')}</td>
-        <td class="mono">${esc(p.numero_informe||'—')}</td>
+        <td class="mono" style="white-space:nowrap">${(IN[p.id]||[]).map(i => esc(i.numero)).join('<br>') || esc(p.numero_informe||'—')}</td>
         <td class="mono">${(C[p.id]||[]).length}</td>
         <td class="mono">${ge} / ${gs}</td>
         <td class="mono">${(S[p.id]||[]).length} / ${(O[p.id]||[]).length}</td>
@@ -449,7 +618,7 @@ async function panelCotizacion(s){
 let tabActual = 'componentes';
 async function renderDetalle(id){
   $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
-  const [p, comp, guias, facts, ocs, sols, arch] = await Promise.all([
+  const [p, comp, guias, facts, ocs, sols, arch, infs] = await Promise.all([
     sb.from('proyectos').select('*').eq('id', id).single(),
     sb.from('proyecto_componentes').select('*').eq('proyecto_id', id).order('created_at'),
     sb.from('proyecto_guias').select('*').eq('proyecto_id', id).order('fecha'),
@@ -457,17 +626,20 @@ async function renderDetalle(id){
     sb.from('ordenes_compra').select('id,numero,fecha_emision,moneda,total,estado,archivo_pdf_url,proveedores(razon_social)').eq('proyecto_id', id).order('numero'),
     sb.from('solicitudes_pedido').select('id,numero,area,solicitante,fecha_solicitud,estado,prioridad').eq('proyecto_id', id).order('numero'),
     sb.from('proyecto_archivos').select('*').eq('proyecto_id', id).order('created_at'),
+    sb.from('informes_tecnicos').select('*, informe_archivos(*)').eq('proyecto_id', id).order('numero'),
   ]);
   if (p.error) { $app.querySelector('main').innerHTML = `<a class="back" href="#/">← Volver</a><div class="err">No se encontró el servicio.</div>`; return; }
-  const s = p.data, C = comp.data||[], G = guias.data||[], F = facts.data||[], O = ocs.data||[], S = sols.data||[], A = arch.data||[];
-  const urls = await firmarUrls(A);
+  const s = p.data, C = comp.data||[], G = guias.data||[], F = facts.data||[], O = ocs.data||[], S = sols.data||[];
+  // los informes viven en el módulo de informes técnicos (las filas antiguas de categoría INFORME quedan solo como respaldo)
+  const A = (arch.data||[]).filter(a => a.categoria !== 'INFORME');
+  const INF = infs.data || [];
+  const urls = await firmarUrls([...A, ...INF.flatMap(archivosInf)]);
   const ge = G.filter(g=>g.tipo==='ENTRADA'), gs = G.filter(g=>g.tipo==='SALIDA');
   // fechas tomadas de las guías: primer ingreso y última salida
   const porFecha = (l) => [...l].filter(g => g.fecha).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
   const gIng = porFecha(ge)[0] || null, gSal = porFecha(gs).slice(-1)[0] || null;
   const diasEntre = (a, b) => Math.max(0, Math.round((new Date((b || new Date().toISOString().slice(0,10)) + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000));
   const diasTaller = gIng ? diasEntre(String(gIng.fecha).slice(0,10), gSal ? String(gSal.fecha).slice(0,10) : null) : null;
-  const INF = A.filter(a => a.categoria === 'INFORME');
   const OCC = A.filter(a => a.categoria === 'OC_CLIENTE');
   const REF = A.filter(esReferencia);
   const Fv = F.filter(f=>f.estado_cobro!=='ANULADA');
@@ -478,7 +650,7 @@ async function renderDetalle(id){
     ...(s.estado_comercial==='DEVUELTO' ? [['Devuelto', 'Equipo devuelto', 'dev']] : []),
     ['Ingreso (guía)', ge.map(g=>g.numero_guia).join(', ') + (gIng ? ` · ${fdate(gIng.fecha)}` : ''), ge.length>0],
     ['Requerimientos / OC', `${S.length} req · ${O.length} OC`, S.length+O.length>0],
-    ['Informe', s.numero_informe || (INF.length ? `${INF.length} archivo(s)` : ''), !!s.numero_informe || INF.length > 0],
+    ['Informe', INF.map(i => i.numero).join(', ') || s.numero_informe || '', INF.length > 0 || !!s.numero_informe],
     ['Salida (guía)', gs.map(g=>g.numero_guia).join(', ') + (gSal ? ` · ${fdate(gSal.fecha)}` : ''), gs.length>0],
     ['Factura', Fv.map(f=>f.numero_factura).join(', '), Fv.length>0],
     ['Cobro', cobrado ? 'Cobrado' : (Fv.length ? 'Pendiente' : ''), cobrado],
@@ -502,7 +674,7 @@ async function renderDetalle(id){
       ${info('Cotización', linkOrText(s.numero_cotizacion, s.enlace_cotizacion))}
       ${info('Referencia del cliente', `<span id="ref-cot">${s.numero_cotizacion ? '<span class="small">leyendo del cotizador…</span>' : '—'}</span>` + `<div class="small occ" style="margin-top:2px">${REF.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}">${tipoDoc(a)}</a><button type="button" class="link sm danger" data-rm="${a.id}" title="Quitar este archivo">✕</button>` : '').join(' · ')}${REF.length ? ' · ' : ''}<button type="button" class="link sm" data-up="REFERENCIA" data-accept="application/pdf,.pdf,image/*">${REF.length ? '+ otro documento' : '📎 Adjuntar documento'}</button></div>`)}
       ${s.numero_cotizacion ? '<div class="cot-panel" id="cot-panel"><div class="small">Cargando la cotización desde el cotizador…</div></div>' : ''}
-      ${info('Informe técnico', linkOrText(s.numero_informe, s.enlace_informe) + (INF.length ? `<div class="small" style="margin-top:2px">${INF.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${tipoDoc(a)}</a>` : '').join(' · ')} · <a href="#" data-tab-ir="informes">ver informes</a></div>` : ''))}
+      ${info('Informe técnico', (INF.length ? INF.map(i => `<div style="margin-bottom:2px"><a href="#" data-tab-ir="informes" class="mono">${esc(i.numero)}</a> · ${esc(i.titulo)} ${enlacesInforme(i, urls)}</div>`).join('') : linkOrText(s.numero_informe, s.enlace_informe)) + `<div class="small" style="margin-top:2px"><button type="button" class="link sm" id="inf-add-top">+ Registrar informe</button></div>`)}
       ${info('Monto del servicio', money(s.monto_servicio, s.moneda))}
       ${info('Responsable', esc(s.responsable||'—'))}
       ${info('Ingreso de componentes', gIng
@@ -526,6 +698,7 @@ async function renderDetalle(id){
     } finally { b.disabled = false; }
   };
   if (!esPI && s.numero_cotizacion) panelCotizacion(s);
+  const infTop = document.getElementById('inf-add-top'); if (infTop) infTop.onclick = async () => { if (await editarInforme(null, { proyectoId: id })) renderDetalle(id); };
   document.getElementById('del').onclick = async () => {
     if (!await confirmModal('¿Eliminar este registro? Se borrarán sus componentes, guías, facturas, fotos y archivos. Las OC y requerimientos vinculados no se borran, solo se desvinculan.')) return;
     if (A.length) await sb.storage.from(BUCKET).remove(A.map(a => a.storage_path));
@@ -632,16 +805,20 @@ async function renderDetalle(id){
   }
 
   if (tabActual === 'informes') {
-    T.innerHTML = `<div class="sec-head"><div class="small">Informes técnicos del ${esPI ? 'proyecto' : 'servicio'} en PDF o Word (versiones, informe final, certificado de operatividad…).</div>
-      <button class="pri sm" data-up="INFORME" data-accept="${ACEPTA_INFORME}">+ Subir informe (PDF / Word)</button></div>
-      <div class="tbl-wrap"><table><thead><tr><th>Tipo</th><th>Informe</th><th>Archivo</th><th>Subido</th><th>Tamaño</th><th></th></tr></thead><tbody>
-      ${INF.map(a => { const u = urls[a.storage_path]; return `<tr><td><span class="doc-tag ${esWord(a)?'w':'p'}">${tipoDoc(a)}</span></td>
-        <td>${esc(a.descripcion || '—')}</td><td class="small" style="max-width:280px;word-break:break-all">${esc(a.nombre)}</td>
-        <td>${fdate(a.created_at)}</td><td class="small">${a.tamano ? kb(a.tamano) : '—'}</td>
-        <td style="white-space:nowrap;text-align:right">${u ? (esWord(a) ? '' : `<a class="link-sm" href="${esc(u)}" target="_blank" rel="noopener">Ver</a> `) + `<a class="link-sm" href="${esc(u)}" download="${esc(a.nombre)}" target="_blank" rel="noopener">Descargar</a>` : ''} <button class="link sm danger" data-rm="${a.id}">Eliminar</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Aún no hay informes. Súbelos en PDF o Word con el botón de arriba.</td></tr>'}
-      </tbody></table></div>
-      ${s.numero_informe ? '' : '<div class="small" style="padding:8px 12px 12px">Consejo: escribe el N° de informe en la descripción al subirlo; si la OT aún no tiene N° de informe, se registra automáticamente.</div>'}`;
-    bindArchivos(T, A, urls, id, reload, s);
+    T.innerHTML = `<div class="sec-head"><div class="small">Informes técnicos de ${esPI ? 'este proyecto' : 'esta OT'} con su número correlativo (IT-AAAA-NNNN · garantías GAR-AAAA-NNNN). También los ves todos en <a href="#/informes">Informes técnicos</a>.</div>
+      <div class="row"><button class="sm" id="inf-vinc">Vincular informe existente</button><button class="pri sm" id="inf-add">+ Nuevo informe</button></div></div>
+      <div class="tbl-wrap"><table><thead><tr><th>N° informe</th><th>Tipo</th><th>Título</th><th>Fecha</th><th>Cotización</th><th>Archivos</th><th></th></tr></thead><tbody>
+      ${INF.map(i => filaInforme(i, urls, { conOT:false, enOT:true })).join('') || '<tr><td colspan="7" class="empty">Aún no hay informes vinculados. Registra uno con «+ Nuevo informe» (el número se asigna solo).</td></tr>'}
+      </tbody></table></div>`;
+    bindFilasInforme(T, INF, reload);
+    document.getElementById('inf-add').onclick = async () => { if (await editarInforme(null, { proyectoId: id })) reload(); };
+    document.getElementById('inf-vinc').onclick = async () => {
+      let libres; try { libres = await cargarInformes({ sinOT: true }); } catch (e) { return toast(e.message); }
+      if (!libres.length) return toast('No hay informes sin OT para vincular');
+      const ok = await formModal({ title: 'Vincular informe a esta OT', fields: [{ k:'inf', l:'Informe sin OT', t:'select', full:true, opts: libres.map(i => [i.id, `${i.numero} · ${i.titulo}${i.cliente ? ' · ' + i.cliente : ''}`]) }], data: { inf: libres[0].id },
+        onSave: async d => chk(await sb.from('informes_tecnicos').update({ proyecto_id: id }).eq('id', d.inf)) });
+      if (ok) reload();
+    };
   }
 
   if (tabActual === 'archivos') {
@@ -758,7 +935,7 @@ function subirArchivos({ proyectoId, categoria, componenteId, guiaId, facturaId 
       <header><h2>${facturaId ? 'Adjuntar factura (PDF y XML)' : guiaId ? 'Adjuntar guía de remisión' : componenteId ? 'Fotos del componente' : esInforme ? 'Subir informe técnico' : esOC ? 'Adjuntar OC del cliente' : esRef ? 'Documento de referencia del cliente' : 'Subir fotos / archivos'}</h2><button type="button" class="link" data-x>✕</button></header>
       <div class="body"><div class="fgrid">
         <label class="f full"><span>${facturaId ? 'Archivos de la factura: PDF y XML (selecciona ambos a la vez; también el CDR .zip si lo tienes)' : esInforme ? 'Archivos del informe (PDF o Word, puedes subir ambos a la vez)' : esOC ? 'Archivo de la OC (PDF, foto o Word)' : esRef ? 'Licitación, SOLPED u otro documento del cliente (PDF o imagen)' : 'Archivos (fotos, PDF o Word, varios a la vez)'}</span><input type="file" name="f" multiple accept="${esc(accept || 'image/*,' + ACEPTA_INFORME)}" required></label>
-        ${fijo ? '' : `<label class="f"><span>Tipo</span><select name="cat">${Object.entries(CATS).map(([k,l])=>`<option value="${k}" ${k===cat?'selected':''}>${l}</option>`).join('')}</select></label>`}
+        ${fijo ? '' : `<label class="f"><span>Tipo</span><select name="cat">${Object.entries(CATS).filter(([k]) => k !== 'INFORME').map(([k,l])=>`<option value="${k}" ${k===cat?'selected':''}>${l}</option>`).join('')}</select></label>`}
         <label class="f ${fijo ? 'full' : ''}"><span>${facturaId ? 'Descripción (opcional)' : esInforme ? 'N° de informe / descripción' : esOC ? 'N° de OC del cliente' : 'Descripción (opcional)'}</span><input name="desc" value="${esOC ? esc(proyecto?.numero_oc_cliente || '') : ''}" placeholder="${facturaId ? 'Ej. Factura electrónica y XML enviados al cliente' : esInforme ? 'Ej. IT-2026-015 · Informe final' : esOC ? 'Ej. 4520004034' : esRef ? 'Ej. SOLPED 30001345 · Bases de licitación' : 'Ej. Estado de llegada, placa de datos…'}"></label>
         ${esOC && !proyecto?.fecha_oc_cliente ? '<label class="f"><span>Fecha de la OC (opcional)</span><input type="date" name="focc"></label>' : ''}
       </div><p class="small" style="margin-top:10px">${facturaId ? 'Formatos: PDF, XML y ZIP (CDR de SUNAT). Límite: 25 MB por archivo.' : esInforme ? 'Formatos: PDF, .doc o .docx. Límite: 25 MB por archivo.' : esOC ? (proyecto?.numero_oc_cliente ? 'Formatos: PDF, foto o Word. Límite: 25 MB.' : 'Si escribes el N° de OC, se registra en la OT y queda como "Con OC cliente". Límite: 25 MB.') : 'Las fotos grandes se reducen automáticamente (máx. 1920 px). Límite: 25 MB por archivo.'}</p>
@@ -853,6 +1030,7 @@ function route(){
   if (!session) return renderLogin();
   const m = location.hash.match(/^#\/servicio\/([0-9a-f-]{36})/);
   if (m) return renderDetalle(m[1]);
+  if (location.hash.startsWith('#/informes')) return renderInformes();
   return renderLista();
 }
 window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/servicio/')) tabActual = 'componentes'; route(); });

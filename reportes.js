@@ -106,18 +106,14 @@ const tabla = (cab, filas, vacio) => filas.length
   ? `<table class="t"><thead><tr>${cab.map(([t, cl]) => `<th class="${cl || ''}">${esc(t)}</th>`).join('')}</tr></thead><tbody>${filas.join('')}</tbody></table>`
   : `<div class="vacio">${esc(vacio)}</div>`;
 
-/** Lista de informes técnicos de la OT: N° / título de cada uno (el PDF y el Word del mismo informe van juntos) */
+/** Lista de informes técnicos de la OT (módulo de informes): N° correlativo, título, tipo de archivo y fecha */
 function informesTexto(s, INF) {
-  const tipo = (a) => /msword|wordprocessingml/.test(a.mime || '') || /\.docx?$/i.test(a.nombre || '') ? 'Word' : (a.mime || '').includes('pdf') || /\.pdf$/i.test(a.nombre || '') ? 'PDF' : 'archivo';
-  const grupos = new Map();
-  [...INF].sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || ''))).forEach(a => {
-    const titulo = String(a.descripcion || '').trim() || String(a.nombre || '').replace(/\.[^.]+$/, '');
-    const k = titulo.toLowerCase();
-    if (!grupos.has(k)) grupos.set(k, { titulo, tipos: new Set(), fecha: a.created_at });
-    grupos.get(k).tipos.add(tipo(a));
-  });
-  if (!grupos.size) return esc(s.numero_informe || '');
-  return `<div>${[...grupos.values()].map(g => `• <b style="color:#111">${esc(g.titulo)}</b> <span style="color:#555">(${[...g.tipos].join(', ')} · ${fdate(g.fecha)})</span>`).join('<br>')}</div>`;
+  const tipo = (a) => /msword|wordprocessingml/.test(a.mime || '') || /\.docx?$/i.test(a.nombre || '') ? 'Word' : (a.mime || '').includes('pdf') || /\.pdf$/i.test(a.nombre || '') ? 'PDF' : (a.mime || '').startsWith('image/') ? 'imagen' : 'archivo';
+  if (!INF.length) return esc(s.numero_informe || '');
+  return `<div>${[...INF].sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')) || String(a.numero || '').localeCompare(String(b.numero || ''))).map(i => {
+    const tipos = [...new Set((i.informe_archivos || []).map(tipo))];
+    return `• <b style="color:#111">${esc(i.numero || '')}</b> — ${esc(i.titulo || '')} <span style="color:#555">(${[tipos.join(', ') || 'sin archivo', fdate(i.fecha)].join(' · ')})</span>`;
+  }).join('<br>')}</div>`;
 }
 
 // ------------------------------------------------------------------ ficha de una OT / PI
@@ -217,9 +213,9 @@ export async function fichaOT(d) {
  * Devuelve las filas ya calculadas (las usa también el Excel).
  */
 export function filasGlobal(d) {
-  const { P, F = [], C = [], G = [], O = [], S = [], etiquetas: L } = d;
+  const { P, F = [], C = [], G = [], O = [], S = [], I = [], etiquetas: L } = d;
   const by = (arr) => arr.reduce((m, r) => { (m[r.proyecto_id] ||= []).push(r); return m; }, {});
-  const bF = by(F), bC = by(C), bG = by(G), bO = by(O), bS = by(S);
+  const bF = by(F), bC = by(C), bG = by(G), bO = by(O), bS = by(S), bI = by(I);
   return P.map(p => {
     const g = bG[p.id] || [], { ing, sal, dias: dT, ge, gs } = fechasGuias(g);
     const fs = (bF[p.id] || []).filter(f => f.estado_cobro !== 'ANULADA');
@@ -235,7 +231,7 @@ export function filasGlobal(d) {
       cotizacion: p.numero_cotizacion || '', ocCliente: p.numero_oc_cliente || '', fechaOc: p.fecha_oc_cliente || '',
       moneda: p.moneda || 'SOLES', monto: p.monto_servicio != null ? Number(p.monto_servicio) : null, presupuesto: p.presupuesto != null ? Number(p.presupuesto) : null,
       ingreso: ing?.fecha || '', guiaIng: ing?.numero_guia || '', salida: sal?.fecha || '', guiaSal: sal?.numero_guia || '', dias: dT,
-      nGe: ge.length, nGs: gs.length, comps: (bC[p.id] || []).length, informe: p.numero_informe || '',
+      nGe: ge.length, nGs: gs.length, comps: (bC[p.id] || []).length, informe: (bI[p.id] || []).map(i => i.numero).join(', ') || p.numero_informe || '',
       reqs: (bS[p.id] || []).length, nOc: ocs.length, comprasS: compras.SOLES || 0, comprasD: compras.DOLARES || 0,
       facturas: fs.map(f => f.numero_factura).join(', '), monedaFact: monF, facturado: fact, cobrado: cob, porCobrar: fact - cob, estCobro,
       creado: p.created_at ? String(p.created_at).slice(0, 10) : '', observaciones: p.observaciones || '',
