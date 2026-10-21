@@ -29,6 +29,7 @@ const badge = (cls, txt) => `<span class="badge b-${esc(cls)}">${esc(txt)}</span
 let session = null;
 let MODO = null;  // 'total' (Maestro) | 'laboratorio' (vista técnica) | 'ninguno'
 const LAB = () => MODO === 'laboratorio';
+let VE_GUIAS = false;  // vista técnica: Planeamiento ve guías de remisión, Laboratorio no
 let filtro = { clase: 'SERVICIO', estado: 'TODOS', q: '', verCerrados: false };
 
 // ---------- modal genérico de formulario ----------
@@ -98,7 +99,7 @@ function renderLogin(){
 function shell(inner){
   return `<header class="top"><a href="#/" class="brand" style="color:#fff">GTO PERU · <span>Maestro de Gestión</span></a>
     <div class="sp"></div>
-    ${LAB() ? '<span class="badge b-pi" style="margin-right:4px">Laboratorio</span><a href="#/" style="color:#fff;font-size:13px;font-weight:500">Servicios</a>' : ''}
+    ${LAB() ? `<span class="badge b-pi" style="margin-right:4px">${VE_GUIAS ? 'Vista técnica' : 'Laboratorio'}</span>`+'<a href="#/" style="color:#fff;font-size:13px;font-weight:500">Servicios</a>' : ''}
     <a href="#/informes" style="color:#fff;font-size:13px;font-weight:500">Informes técnicos</a>
     <a href="${OC_APP}" target="_blank" rel="noopener" style="color:#cbd5e1;font-size:13px">Sistema OC ↗</a>
     <span class="user">${esc(session?.user?.email)}</span>
@@ -1090,16 +1091,17 @@ async function renderLabDetalle(id){
   const esPI = s.clase === 'INTERNO';
   const info = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
   const fotos = A.filter(a => a.categoria === 'FOTO_EQUIPO');
-  const tabs = [['componentes','Componentes',C.length],['guias','Guías de remisión',G.length],['informes','Informes técnicos',INF.length],['fotos','Fotos',fotos.length]];
+  if (!VE_GUIAS && tabLab === 'guias') tabLab = 'componentes';
+  const tabs = [['componentes','Componentes',C.length], ...(VE_GUIAS ? [['guias','Guías de remisión',G.length]] : []), ['informes','Informes técnicos',INF.length],['fotos','Fotos',fotos.length]];
   $app.querySelector('main').innerHTML = `
     <a class="back" href="#/">← ${esPI ? 'Proyectos internos' : 'Servicios'}</a>
     <div class="detail-head">
       <div><div class="ot-tag ${esPI ? 'pi ' : ''}mono">${esc(s.numero_orden_trabajo || '')}</div><h1>${esc(s.nombre)}</h1><div class="sub">${esc(s.cliente || (esPI ? 'Proyecto interno' : 'Sin cliente'))} · ${esc((s.tipo || '').toLowerCase())}${s.estado !== 'activo' ? ' · ' + esc(s.estado) : ''}</div>
-        <div class="row" style="margin-top:6px">${badge('op', EST_OP[s.estado_operativo] || s.estado_operativo || '—')} ${badge('pi', 'Vista técnica · Laboratorio')}</div></div>
+        <div class="row" style="margin-top:6px">${badge('op', EST_OP[s.estado_operativo] || s.estado_operativo || '—')} ${badge('pi', VE_GUIAS ? 'Vista técnica · Planeamiento' : 'Vista técnica · Laboratorio')}</div></div>
     </div>
     <div class="grid-info">
       ${info('N° OC del cliente', s.numero_oc_cliente ? `<span class="mono">${esc(s.numero_oc_cliente)}</span> <span class="small">${fdate(s.fecha_oc_cliente)}</span>` : '—')}
-      ${info('Fecha de ingreso', s.fecha_ingreso ? `${fdate(s.fecha_ingreso)} <div class="small">Guía ${esc(s.guia_ingreso || '')}${ge.length > 1 ? ` (+${ge.length - 1} guía${ge.length > 2 ? 's' : ''} más)` : ''} · ${dias} día${dias === 1 ? '' : 's'} en taller${s.fecha_salida ? ` · salió el ${fdate(s.fecha_salida)}` : ''}</div>` : '<span class="small">Sin guía de entrada registrada</span>')}
+      ${info('Fecha de ingreso', s.fecha_ingreso ? `${fdate(s.fecha_ingreso)} <div class="small">${s.guia_ingreso ? `Guía ${esc(s.guia_ingreso)}${ge.length > 1 ? ` (+${ge.length - 1} guía${ge.length > 2 ? 's' : ''} más)` : ''} · ` : ''}${dias} día${dias === 1 ? '' : 's'} en taller${s.fecha_salida ? ` · salió el ${fdate(s.fecha_salida)}` : ''}</div>` : '<span class="small">Sin guía de entrada registrada</span>')}
       ${info('N° de serie', s.series ? `<span class="mono">${esc(s.series)}</span>` : '—')}
       ${info('Informe técnico', (INF.length ? INF.map(i => `<div style="margin-bottom:2px"><a href="#" data-tab-ir="informes" class="mono">${esc(i.numero)}</a> · ${esc(i.titulo)} ${enlacesInforme(i, urls)}</div>`).join('') : '—') + `<div class="small" style="margin-top:2px"><button type="button" class="link sm" id="inf-add-top">+ Registrar informe</button></div>`)}
       ${info('Responsable', esc(s.responsable || '—'))}
@@ -1136,7 +1138,7 @@ async function renderLabDetalle(id){
     bindArchivos(T, fotos, urls, id, reload); soloPropios();
   }
 
-  if (tabLab === 'guias') {
+  if (tabLab === 'guias' && VE_GUIAS) {
     const pdfs = (gid) => A.filter(a => a.guia_id === gid && urls[a.storage_path]).map(a => `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener">${esImg(a) ? 'Imagen' : 'PDF'}</a>`).join(' · ');
     T.innerHTML = `<div class="sec-head"><div class="small">Guías de remisión de entrada (ingreso a taller) y salida. Las registra Administración.</div></div>
       <div class="tbl-wrap"><table><thead><tr><th>Tipo</th><th>N° guía</th><th>Fecha</th><th>Detalle</th><th>Archivo</th></tr></thead><tbody>
@@ -1167,7 +1169,10 @@ async function renderLabDetalle(id){
 async function route(){
   $modal.innerHTML = ''; document.onkeydown = null;  // cerrar ventanas abiertas al cambiar de página
   if (!session) { MODO = null; return renderLogin(); }
-  if (!MODO) { const r = await sb.rpc('acceso_maestro'); MODO = r.error ? 'total' : (r.data || 'ninguno'); }
+  if (!MODO) {
+    const r = await sb.rpc('acceso_maestro'); MODO = r.error ? 'total' : (r.data || 'ninguno');
+    if (MODO === 'laboratorio') { const g = await sb.rpc('ve_guias'); VE_GUIAS = g.data === true; }
+  }
   const m = location.hash.match(/^#\/servicio\/([0-9a-f-]{36})/);
   if (LAB()) {
     if (m) return renderLabDetalle(m[1]);
