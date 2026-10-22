@@ -1296,15 +1296,22 @@ const fechaLarga = (d) => { const [y, m, dd] = String(d).slice(0, 10).split('-')
 const fechaPuntos = (d) => d ? String(d).slice(0, 10).split('-').reverse().join('.') : '—';
 const importeCarta = (n, m) => (m === 'DOLARES' ? '$' : 'S/ ') + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 let filtroFact = { estado: 'ACTIVAS', q: '' };
+const CONCEPTO_ABONO = { DESEMBOLSO:'Desembolso', CONFIRMACION:'Pendiente por confirmación', EXCEDENTE:'Excedente (devolución)', OTRO:'Otro' };
+const costosLiq = (c) => ['costo_interes','costo_comision','costo_gastos','costo_igv'].some(k => c[k] != null) ? ['costo_interes','costo_comision','costo_gastos','costo_igv'].reduce((t, k) => t + Number(c[k] || 0), 0) : null;
+// costo real del factoring: costos de la liquidación; si no hay, importe − detracción − neto
+const costoFactoring = (c) => { const k = costosLiq(c); if (k != null) return k; return c.neto_recibir == null ? null : Number(c.importe) - Number(c.detraccion || 0) - Number(c.neto_recibir); };
 
 async function cargarFactoring(){
-  const [c, e, d, cfg] = await Promise.all([
+  const [c, e, d, cfg, ab] = await Promise.all([
     sb.from('factoring_cartas').select('*, proyectos:proyecto_id(numero_orden_trabajo,numero_oc_cliente,nombre)').order('fecha', { ascending: false }).order('numero', { ascending: false }),
     sb.from('factoring_entidades').select('*').order('nombre'),
     sb.from('factoring_destinatarios').select('*').order('razon_social'),
     sb.from('factoring_config').select('*').eq('id', 1).maybeSingle(),
+    sb.from('factoring_abonos').select('*').order('fecha', { ascending: true, nullsFirst: false }),
   ]);
   if (c.error) throw new Error(c.error.message);
+  const A = ab.data || [];
+  (c.data || []).forEach(x => { x.abonos = A.filter(a => a.carta_id === x.id); });
   return { cartas: c.data || [], entidades: e.data || [], destinatarios: d.data || [], config: cfg.data || { id: 1, lugar: 'Arequipa' } };
 }
 
@@ -1327,32 +1334,29 @@ async function renderFactoring(){
       <div class="row"><button id="fac-cfg">⚙ Configuración</button><button class="pri" id="fac-nueva">+ Nueva carta</button></div>
     </div>
     ${D.config.firma_imagen ? '' : '<div class="err" style="margin-top:12px">Falta cargar la imagen de firma y sello de Gerencia General. Entra a ⚙ Configuración para subirla (las cartas saldrán sin firma hasta entonces).</div>'}
-    <div class="kpis">${kpi(vig.length, 'Cartas emitidas')}${kpi(suma(vig, c => c.importe), 'Importe cedido')}${kpi(suma(porRecibir, c => c.neto_recibir), 'Neto por recibir' + (sinNeto ? ` · ${sinNeto} sin neto` : ''))}${kpi(suma(vig.filter(c => c.estado === 'ABONADO'), c => c.neto_recibir), 'Neto ya abonado')}${kpi(suma(vig.filter(c => c.neto_recibir != null), c => c.importe - c.neto_recibir), 'Costo del factoring')}</div>
+    <div class="kpis">${kpi(vig.length, 'Cartas emitidas')}${kpi(suma(vig, c => c.importe), 'Importe cedido')}${kpi(suma(vig, c => c.abonos.length ? c.abonos.filter(a => !a.recibido).reduce((t, a) => t + Number(a.monto), 0) : (c.estado === 'EMITIDA' ? c.neto_recibir : null)), 'Neto por recibir' + (sinNeto ? ` · ${sinNeto} sin neto` : ''))}${kpi(suma(vig, c => c.abonos.length ? c.abonos.filter(a => a.recibido).reduce((t, a) => t + Number(a.monto), 0) : (c.estado === 'ABONADO' ? c.neto_recibir : null)), 'Neto ya recibido')}${kpi(suma(vig, costoFactoring), 'Costo del factoring')}</div>
     <div class="panel">
       <div class="toolbar">
         <input type="search" id="fac-q" placeholder="Buscar carta, cliente, factura, OT u OC…" value="${esc(filtroFact.q)}">
         <select id="fac-est">${[['ACTIVAS','Vigentes'],['EMITIDA','Por abonar'],['ABONADO','Abonadas'],['ANULADA','Anuladas'],['TODAS','Todas']].map(([k, l]) => `<option value="${k}" ${filtroFact.estado === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <div style="flex:1"></div><span class="small">${rows.length} carta(s)</span>
       </div>
-      <div class="tbl-wrap"><table><thead><tr><th>Carta</th><th>Fecha</th><th>Cliente</th><th>OT / OC</th><th>Factura</th><th style="text-align:right">Importe</th><th>Vence</th><th>Factoring</th><th style="text-align:right">Neto a recibir</th><th>Abono</th><th>Estado / acciones</th></tr></thead>
+      <div class="tbl-wrap"><table><thead><tr><th>Carta / cliente</th><th>OT / OC</th><th>Factura</th><th style="text-align:right">Importe</th><th>Factoring</th><th style="text-align:right">Neto a recibir</th><th>Abonos</th><th>Estado / acciones</th></tr></thead>
       <tbody>${rows.map(c => `<tr>
-        <td class="mono" style="white-space:nowrap;font-weight:500">${esc(codigoCorto(c))}</td>
-        <td style="white-space:nowrap">${fdate(c.fecha)}</td>
-        <td class="small" style="color:var(--ink);min-width:130px">${esc(c.cliente_razon)}</td>
+        <td style="min-width:150px"><span class="mono" style="white-space:nowrap;font-weight:500">${esc(codigoCorto(c))}</span><div class="small">${fdate(c.fecha)}</div><div class="small">${esc(c.cliente_razon)}</div></td>
         <td style="white-space:nowrap">${c.proyecto_id ? `<a class="mono" href="#/servicio/${c.proyecto_id}">${esc(c.proyectos?.numero_orden_trabajo || 'OT')}</a>${c.proyectos?.numero_oc_cliente ? `<div class="small">OC ${esc(c.proyectos.numero_oc_cliente)}</div>` : ''}` : '<span class="small">Sin OT</span>'}</td>
-        <td class="mono" style="white-space:nowrap">${esc(c.numero_factura)}</td>
+        <td class="mono" style="white-space:nowrap">${esc(c.numero_factura)}<div class="small">Vence ${fdate(c.fecha_vencimiento)}</div></td>
         <td class="money" style="white-space:nowrap">${money(c.importe, c.moneda)}</td>
-        <td style="white-space:nowrap">${fdate(c.fecha_vencimiento)}</td>
         <td class="small" style="color:var(--ink)">${esc(c.entidad_nombre)}</td>
-        <td class="money" style="white-space:nowrap">${c.neto_recibir != null ? money(c.neto_recibir, c.moneda) : '<span class="small">Por definir</span>'}${c.neto_recibir != null && c.importe ? `<div class="small">Costo ${money(c.importe - c.neto_recibir, c.moneda)}</div>` : ''}</td>
-        <td style="white-space:nowrap">${fdate(c.fecha_abono)}</td>
-        <td style="min-width:170px">${badge(c.estado === 'ABONADO' ? 'COBRADO' : c.estado === 'ANULADA' ? 'ANULADA' : 'PENDIENTE', EST_FACT[c.estado])}
+        <td class="money" style="white-space:nowrap">${c.neto_recibir != null ? money(c.neto_recibir, c.moneda) : '<span class="small">Por definir</span>'}${costoFactoring(c) != null ? `<div class="small">Costo ${money(costoFactoring(c), c.moneda)}</div>` : ''}${c.detraccion ? `<div class="small">Detracción ${money(c.detraccion, c.moneda)}</div>` : ''}</td>
+        <td style="white-space:nowrap">${c.abonos.length ? c.abonos.map(a => `<div class="small" style="color:${a.recibido ? 'var(--ok)' : 'var(--warn)'}">${a.recibido ? '✓' : '○'} ${money(a.monto, c.moneda)} · ${a.fecha ? fdate(a.fecha) : 'sin fecha'}<br><span style="color:var(--muted)">${esc(CONCEPTO_ABONO[a.concepto] || a.concepto)}</span></div>`).join('') : fdate(c.fecha_abono)}${c.liquidacion_numero ? `<div class="small">Liq. N° ${esc(c.liquidacion_numero)}</div>` : ''}</td>
+        <td style="min-width:170px">${c.estado === 'EMITIDA' && c.abonos.some(x => x.recibido) ? badge('PARCIAL', 'Abono parcial') : badge(c.estado === 'ABONADO' ? 'COBRADO' : c.estado === 'ANULADA' ? 'ANULADA' : 'PENDIENTE', EST_FACT[c.estado])}
           <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:0 2px">
           <button class="link sm" data-fp="${c.id}">Imprimir</button>
           <button class="link sm" data-fe="${c.id}">Editar</button>
-          ${c.estado === 'EMITIDA' ? `<button class="link sm" data-fa="${c.id}">Registrar abono</button>` : ''}
+          ${c.estado !== 'ANULADA' ? `<button class="link sm" data-fa="${c.id}">Liquidación y abonos</button>` : ''}
           ${c.estado !== 'ANULADA' ? `<button class="link sm danger" data-fx="${c.id}">Anular</button>` : ''}
-        </div></td></tr>`).join('') || '<tr><td colspan="11" class="empty">No hay cartas con este filtro.</td></tr>'}</tbody></table></div>
+        </div></td></tr>`).join('') || '<tr><td colspan="9" class="empty">No hay cartas con este filtro.</td></tr>'}</tbody></table></div>
     </div>`;
   const reload = () => renderFactoring();
   const busca = (id) => cartas.find(c => c.id === id);
@@ -1362,7 +1366,7 @@ async function renderFactoring(){
   document.getElementById('fac-est').onchange = (e) => { filtroFact.estado = e.target.value; reload(); };
   $app.querySelectorAll('[data-fp]').forEach(b => b.onclick = () => imprimirCarta(busca(b.dataset.fp), D.config));
   $app.querySelectorAll('[data-fe]').forEach(b => b.onclick = async () => { if (await editarCarta(busca(b.dataset.fe), D)) reload(); });
-  $app.querySelectorAll('[data-fa]').forEach(b => b.onclick = async () => { if (await registrarAbono(busca(b.dataset.fa))) reload(); });
+  $app.querySelectorAll('[data-fa]').forEach(b => b.onclick = async () => { if (await liquidacionAbonos(busca(b.dataset.fa))) reload(); });
   $app.querySelectorAll('[data-fx]').forEach(b => b.onclick = async () => {
     const c = busca(b.dataset.fx);
     if (!await confirmModal(`¿Anular la carta ${codigoCorto(c)}? Queda en el historial como anulada y ya no se considera en el presupuesto. El número no se reutiliza.`)) return;
@@ -1408,8 +1412,8 @@ async function editarCarta(carta, D){
       ${lab('Lugar', `<input name="lugar" value="${esc(c0.lugar || config.lugar || 'Arequipa')}">`)}
       ${lab('N° de carta', `<input name="numero" type="number" min="1" value="${esc(c0.numero ?? '')}" placeholder="Automático">`)}
       <div class="fsec">Lo que se recibirá (para el presupuesto)</div>
-      ${lab('Neto a recibir del factoring', `<input name="neto_recibir" type="number" step="any" value="${esc(c0.neto_recibir ?? '')}" placeholder="Lo que deposita el factoring">`)}
-      ${lab('Fecha de abono (estimada o real)', `<input name="fecha_abono" type="date" value="${esc(c0.fecha_abono || '')}">`)}
+      ${c0.abonos?.length ? `<div class="small" style="grid-column:1/-1">Esta carta ya tiene ${c0.abonos.length} abono(s) registrados (neto ${money(c0.neto_recibir, c0.moneda)}). Se editan en <b>Liquidación y abonos</b>.</div>` : lab('Neto a recibir del factoring (estimado)', `<input name="neto_recibir" type="number" step="any" value="${esc(c0.neto_recibir ?? '')}" placeholder="Lo que deposita el factoring">`)}
+      ${c0.abonos?.length ? '' : lab('Fecha de abono (estimada)', `<input name="fecha_abono" type="date" value="${esc(c0.fecha_abono || '')}">`)}
       ${lab('Observación', `<input name="observacion" value="${esc(c0.observacion || '')}">`, true)}
     </div><div class="small" id="fc-info" style="margin-top:8px"></div><div class="err" hidden></div></div>
     <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">${carta ? 'Guardar' : 'Guardar e imprimir carta'}</button></footer></form></div>`;
@@ -1418,7 +1422,7 @@ async function editarCarta(carta, D){
   const info = form.querySelector('#fc-info');
   const showErr = (m) => { const e = form.querySelector('.err'); e.hidden = false; e.textContent = m; };
   const actualizaInfo = () => {
-    const imp = +el('importe').value, neto = el('neto_recibir').value === '' ? null : +el('neto_recibir').value;
+    const imp = +el('importe').value, neto = !el('neto_recibir') || el('neto_recibir').value === '' ? null : +el('neto_recibir').value;
     const d = dests.find(x => x.id === el('destinatario_id').value);
     const sig = d ? d.sigla : '';
     const anio = (el('fecha').value || hoy).slice(0, 4);
@@ -1445,7 +1449,7 @@ async function editarCarta(carta, D){
   el('proyecto_id').onchange = () => llenarFacturas(false);
   el('factura_id').onchange = aplicarFactura;
   el('destinatario_id').onchange = aplicarDest;
-  ['importe', 'neto_recibir', 'moneda', 'fecha', 'numero'].forEach(n => el(n).addEventListener('input', actualizaInfo));
+  ['importe', 'neto_recibir', 'moneda', 'fecha', 'numero'].forEach(n => el(n)?.addEventListener('input', actualizaInfo));
   actualizaInfo();
   return new Promise(resolve => {
     const close = (r) => { $modal.innerHTML = ''; resolve(r); };
@@ -1464,8 +1468,9 @@ async function editarCarta(carta, D){
         destinatario_id: d.id, cliente_razon: d.razon_social, sigla: d.sigla, atencion: val(v('atencion')),
         entidad_id: en.id, entidad_nombre: en.nombre, entidad_ruc: en.ruc, entidad_telefono: en.telefono, entidad_correo: en.correo,
         fecha, anio: +fecha.slice(0, 4), lugar: v('lugar') || 'Arequipa',
-        neto_recibir: v('neto_recibir') === '' ? null : +v('neto_recibir'), fecha_abono: val(v('fecha_abono')), observacion: val(v('observacion')),
+        observacion: val(v('observacion')),
       };
+      if (el('neto_recibir')) { row.neto_recibir = v('neto_recibir') === '' ? null : +v('neto_recibir'); row.fecha_abono = val(v('fecha_abono')); }
       if (v('numero')) row.numero = +v('numero'); else if (!carta) row.numero = null;
       const w = carta ? null : window.open('about:blank', '_blank');
       const btn = form.querySelector('[type=submit]'); btn.disabled = true;
@@ -1479,21 +1484,90 @@ async function editarCarta(carta, D){
   });
 }
 
-async function registrarAbono(c){
+async function liquidacionAbonos(c){
   const hoy = new Date().toISOString().slice(0, 10);
-  return formModal({
-    title: `Registrar abono · carta ${codigoCorto(c)}`,
-    fields: [
-      { k: 'neto_recibir', l: `Neto abonado por ${c.entidad_nombre} (${c.moneda === 'DOLARES' ? 'US$' : 'S/'})`, t: 'number', req: true, def: c.neto_recibir ?? '' },
-      { k: 'fecha_abono', l: 'Fecha del abono', t: 'date', req: true, def: c.fecha_abono && c.fecha_abono <= hoy ? c.fecha_abono : hoy },
-      { k: 'marcar', l: 'Marcar la factura como cobrada en la OT', t: 'select', opts: [['SI', 'Sí'], ['NO', 'No']], def: c.factura_id ? 'SI' : 'NO' },
-    ],
-    data: {},
-    onSave: async (d) => {
-      chk(await sb.from('factoring_cartas').update({ estado: 'ABONADO', neto_recibir: d.neto_recibir, fecha_abono: d.fecha_abono }).eq('id', c.id));
-      if (d.marcar === 'SI' && c.factura_id) chk(await sb.from('proyecto_facturas').update({ estado_cobro: 'COBRADO', monto_cobrado: c.importe, fecha_cobro: d.fecha_abono, observacion: `Cedida a ${c.entidad_nombre} · carta ${codigoCorto(c)}` }).eq('id', c.factura_id));
-      toast('Abono registrado');
-    },
+  const sim = c.moneda === 'DOLARES' ? 'US$' : 'S/';
+  let filas = c.abonos.length ? c.abonos.map(a => ({ ...a })) : [];
+  const num = (v) => v === '' || v == null ? null : Number(v);
+  const lab = (t, html) => `<label class="f"><span>${t}</span>${html}</label>`;
+  const inpN = (n, v) => `<input name="${n}" type="number" step="any" value="${esc(v ?? '')}">`;
+  $modal.innerHTML = `<div class="ov"><form class="modal" novalidate style="max-width:860px">
+    <header><h2>Liquidación y abonos · carta ${esc(codigoCorto(c))} · factura ${esc(c.numero_factura)} (${money(c.importe, c.moneda)})</h2><button type="button" class="link" data-x>✕</button></header>
+    <div class="body"><div class="fgrid">
+      <div class="fsec">Liquidación de ${esc(c.entidad_nombre)}</div>
+      ${lab('N° de liquidación', `<input name="liquidacion_numero" value="${esc(c.liquidacion_numero || '')}" placeholder="41788">`)}
+      ${lab('Fecha de operación', `<input name="liquidacion_fecha" type="date" value="${esc(c.liquidacion_fecha || '')}">`)}
+      ${lab(`Detracción (${sim})`, inpN('detraccion', c.detraccion))}
+      ${lab(`Diferencia de precio / interés (${sim})`, inpN('costo_interes', c.costo_interes))}
+      ${lab(`Comisión (${sim})`, inpN('costo_comision', c.costo_comision))}
+      ${lab(`Gastos operacionales y otros (${sim})`, inpN('costo_gastos', c.costo_gastos))}
+      ${lab(`IGV (${sim})`, inpN('costo_igv', c.costo_igv))}
+    </div>
+    <div class="fsec" style="margin-top:12px">Abonos que deposita el factoring</div>
+    <div class="tbl-wrap"><table><thead><tr><th>Concepto</th><th style="width:130px">Monto (${sim})</th><th style="width:150px">Fecha</th><th>Recibido</th><th></th></tr></thead><tbody id="ab-rows"></tbody></table></div>
+    <div class="row" style="margin-top:6px"><button type="button" class="sm" id="ab-add">+ Agregar abono</button><button type="button" class="sm" id="ab-plant" title="Desembolso + pendiente por confirmación (CxP) + excedente">Plantilla BANPRO</button></div>
+    <div id="ab-cuadre" class="small" style="margin-top:10px"></div>
+    <label class="f" style="margin-top:8px;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="marcar" ${c.factura_id ? 'checked' : 'disabled'} style="width:auto"><span>Cuando todo esté recibido, marcar la factura de la OT como cobrada</span></label>
+    <div class="err" hidden></div></div>
+    <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">Guardar</button></footer></form></div>`;
+  const form = $modal.querySelector('form');
+  const tb = form.querySelector('#ab-rows');
+  const leer = () => { tb.querySelectorAll('tr').forEach((tr, i) => { const f = filas[i]; f.concepto = tr.querySelector('[data-k=concepto]').value; f.monto = num(tr.querySelector('[data-k=monto]').value); f.fecha = tr.querySelector('[data-k=fecha]').value || null; f.recibido = tr.querySelector('[data-k=recibido]').checked; }); };
+  const cuadre = () => {
+    leer();
+    const v = (n) => Number(form.elements[n].value || 0);
+    const costos = v('costo_interes') + v('costo_comision') + v('costo_gastos') + v('costo_igv');
+    const abonos = filas.reduce((t, f) => t + Number(f.monto || 0), 0);
+    const rec = filas.filter(f => f.recibido).reduce((t, f) => t + Number(f.monto || 0), 0);
+    const dif = Math.round((Number(c.importe) - v('detraccion') - costos - abonos) * 100) / 100;
+    form.querySelector('#ab-cuadre').innerHTML = `Factura ${money(c.importe, c.moneda)} − detracción ${money(v('detraccion'), c.moneda)} − costos ${money(costos, c.moneda)} − abonos ${money(abonos, c.moneda)} = <b style="color:${Math.abs(dif) < 0.01 ? 'var(--ok)' : 'var(--bad)'}">${money(dif, c.moneda)}</b> ${Math.abs(dif) < 0.01 ? '✓ cuadra' : '(debería ser 0)'}<br>Recibido: <b>${money(rec, c.moneda)}</b> · Por recibir: <b>${money(abonos - rec, c.moneda)}</b> · Costo real: <b>${money(costos, c.moneda)}</b>${costos && c.importe ? ` (${(100 * costos / c.importe).toFixed(2)}%)` : ''}`;
+  };
+  const pintar = () => {
+    tb.innerHTML = filas.map((f, i) => `<tr>
+      <td><select data-k="concepto">${Object.entries(CONCEPTO_ABONO).map(([k, l]) => `<option value="${k}" ${f.concepto === k ? 'selected' : ''}>${l}</option>`).join('')}</select>${f.descripcion ? `<div class="small">${esc(f.descripcion)}</div>` : ''}</td>
+      <td><input data-k="monto" type="number" step="any" value="${esc(f.monto ?? '')}"></td>
+      <td><input data-k="fecha" type="date" value="${esc(f.fecha || '')}"></td>
+      <td style="text-align:center"><input data-k="recibido" type="checkbox" ${f.recibido ? 'checked' : ''} style="width:auto"></td>
+      <td><button type="button" class="link sm danger" data-del="${i}">Quitar</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin abonos. Usa "Plantilla BANPRO" o "+ Agregar abono".</td></tr>';
+    tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { leer(); filas.splice(+b.dataset.del, 1); pintar(); });
+    tb.querySelectorAll('input,select').forEach(x => x.addEventListener('input', cuadre));
+    cuadre();
+  };
+  form.querySelectorAll('input[name]').forEach(x => x.addEventListener('input', cuadre));
+  form.querySelector('#ab-add').onclick = () => { leer(); filas.push({ concepto: 'DESEMBOLSO', monto: null, fecha: hoy, recibido: false }); pintar(); };
+  form.querySelector('#ab-plant').onclick = () => { leer(); filas.push(
+    { concepto: 'DESEMBOLSO', monto: null, fecha: form.elements.liquidacion_fecha.value || hoy, recibido: true, descripcion: 'Monto líquido de la liquidación' },
+    { concepto: 'CONFIRMACION', monto: null, fecha: null, recibido: false, descripcion: 'Monto CxP: se deposita cuando el cliente confirme la factura' },
+    { concepto: 'EXCEDENTE', monto: null, fecha: c.fecha_vencimiento || null, recibido: false, descripcion: 'Excedente que se devuelve cuando el cliente pague' }); pintar(); };
+  pintar();
+  return new Promise(resolve => {
+    const close = (r) => { $modal.innerHTML = ''; resolve(r); };
+    $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = () => close(false));
+    form.onsubmit = async (e) => {
+      e.preventDefault(); leer();
+      const showErr = (m) => { const x = form.querySelector('.err'); x.hidden = false; x.textContent = m; };
+      if (filas.some(f => !(f.monto > 0))) return showErr('Cada abono debe tener un monto mayor a 0.');
+      const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+      try {
+        const v = (n) => form.elements[n].value.trim();
+        chk(await sb.from('factoring_cartas').update({ liquidacion_numero: val(v('liquidacion_numero')), liquidacion_fecha: val(v('liquidacion_fecha')),
+          detraccion: num(v('detraccion')), costo_interes: num(v('costo_interes')), costo_comision: num(v('costo_comision')), costo_gastos: num(v('costo_gastos')), costo_igv: num(v('costo_igv')) }).eq('id', c.id));
+        const quedan = new Set(filas.filter(f => f.id).map(f => f.id));
+        const borrar = c.abonos.filter(a => !quedan.has(a.id)).map(a => a.id);
+        if (borrar.length) chk(await sb.from('factoring_abonos').delete().in('id', borrar));
+        for (const f of filas) {
+          const row = { carta_id: c.id, concepto: f.concepto, monto: f.monto, fecha: f.fecha, recibido: !!f.recibido, descripcion: f.descripcion || null };
+          chk(f.id ? await sb.from('factoring_abonos').update(row).eq('id', f.id) : await sb.from('factoring_abonos').insert(row));
+        }
+        if (!filas.length) chk(await sb.from('factoring_cartas').update({ estado: 'EMITIDA' }).eq('id', c.id));
+        const todo = filas.length && filas.every(f => f.recibido);
+        if (todo && form.elements.marcar.checked && c.factura_id) {
+          const ult = filas.map(f => f.fecha).filter(Boolean).sort().pop() || hoy;
+          chk(await sb.from('proyecto_facturas').update({ estado_cobro: 'COBRADO', monto_cobrado: c.importe, fecha_cobro: ult, observacion: `Cedida a ${c.entidad_nombre} · carta ${codigoCorto(c)}` }).eq('id', c.factura_id));
+        }
+        toast('Liquidación y abonos guardados'); close(true);
+      } catch (err) { btn.disabled = false; showErr(err.message); }
+    };
   });
 }
 
