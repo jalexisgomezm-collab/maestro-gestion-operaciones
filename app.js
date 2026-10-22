@@ -850,11 +850,11 @@ const esImg = (a) => (a.mime||'').startsWith('image/');
 const esWord = (a) => /msword|wordprocessingml/.test(a.mime || '') || /\.docx?$/i.test(a.nombre || '');
 const esXml = (a) => /xml/.test(a.mime || '') || /\.xml$/i.test(a.nombre || '');
 const esZip = (a) => /zip/.test(a.mime || '') || /\.zip$/i.test(a.nombre || '');
-const tipoDoc = (a) => esWord(a) ? 'WORD' : (a.mime || '').includes('pdf') ? 'PDF' : esXml(a) ? 'XML' : esZip(a) ? (/^r-|cdr/i.test(a.nombre||'') ? 'CDR' : 'ZIP') : esImg(a) ? 'IMG' : 'ARCH';
+const tipoDoc = (a) => esWord(a) ? 'WORD' : (a.mime || '').includes('pdf') ? 'PDF' : esXml(a) ? 'XML' : esZip(a) ? (/^r-|cdr/i.test(a.nombre||'') ? 'CDR' : 'ZIP') : esImg(a) ? 'IMG' : /excel|spreadsheet/.test(a.mime || '') ? 'XLS' : 'ARCH';
 const ACEPTA_FACTURA = '.pdf,.xml,.zip,application/pdf,application/xml,text/xml,application/zip,application/x-zip-compressed';
 const ACEPTA_OC = 'application/pdf,.pdf,image/*,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ACEPTA_INFORME = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const MIME_EXT = { pdf:'application/pdf', doc:'application/msword', docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xml:'application/xml', zip:'application/zip', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', heic:'image/heic' };
+const MIME_EXT = { pdf:'application/pdf', doc:'application/msword', docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xml:'application/xml', zip:'application/zip', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', heic:'image/heic', xls:'application/vnd.ms-excel', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
 const kb = (n) => n > 1048576 ? (n/1048576).toFixed(1)+' MB' : Math.max(1, Math.round(n/1024))+' KB';
 async function firmarUrls(A){
   if (!A.length) return {};
@@ -1302,16 +1302,18 @@ const costosLiq = (c) => ['costo_interes','costo_comision','costo_gastos','costo
 const costoFactoring = (c) => { const k = costosLiq(c); if (k != null) return k; return c.neto_recibir == null ? null : Number(c.importe) - Number(c.detraccion || 0) - Number(c.neto_recibir); };
 
 async function cargarFactoring(){
-  const [c, e, d, cfg, ab] = await Promise.all([
+  const [c, e, d, cfg, ab, dc] = await Promise.all([
     sb.from('factoring_cartas').select('*, proyectos:proyecto_id(numero_orden_trabajo,numero_oc_cliente,nombre)').order('fecha', { ascending: false }).order('numero', { ascending: false }),
     sb.from('factoring_entidades').select('*').order('nombre'),
     sb.from('factoring_destinatarios').select('*').order('razon_social'),
     sb.from('factoring_config').select('*').eq('id', 1).maybeSingle(),
     sb.from('factoring_abonos').select('*').order('fecha', { ascending: true, nullsFirst: false }),
+    sb.from('factoring_documentos').select('*').order('creado_at'),
   ]);
   if (c.error) throw new Error(c.error.message);
   const A = ab.data || [];
-  (c.data || []).forEach(x => { x.abonos = A.filter(a => a.carta_id === x.id); });
+  const DC = dc.data || [];
+  (c.data || []).forEach(x => { x.abonos = A.filter(a => a.carta_id === x.id); x.docs = DC.filter(a => a.carta_id === x.id); });
   return { cartas: c.data || [], entidades: e.data || [], destinatarios: d.data || [], config: cfg.data || { id: 1, lugar: 'Arequipa' } };
 }
 
@@ -1355,6 +1357,7 @@ async function renderFactoring(){
           <button class="link sm" data-fp="${c.id}">Imprimir</button>
           <button class="link sm" data-fe="${c.id}">Editar</button>
           ${c.estado !== 'ANULADA' ? `<button class="link sm" data-fa="${c.id}">Liquidación y abonos</button>` : ''}
+          <button class="link sm" data-fd="${c.id}" title="Evidencias: carta recibida, liquidación, depósitos…">📎 Documentos${c.docs.length ? ` (${c.docs.length})` : ''}</button>
           ${c.estado !== 'ANULADA' ? `<button class="link sm danger" data-fx="${c.id}">Anular</button>` : ''}
         </div></td></tr>`).join('') || '<tr><td colspan="9" class="empty">No hay cartas con este filtro.</td></tr>'}</tbody></table></div>
     </div>`;
@@ -1366,6 +1369,7 @@ async function renderFactoring(){
   document.getElementById('fac-est').onchange = (e) => { filtroFact.estado = e.target.value; reload(); };
   $app.querySelectorAll('[data-fp]').forEach(b => b.onclick = () => imprimirCarta(busca(b.dataset.fp), D.config));
   $app.querySelectorAll('[data-fe]').forEach(b => b.onclick = async () => { if (await editarCarta(busca(b.dataset.fe), D)) reload(); });
+  $app.querySelectorAll('[data-fd]').forEach(b => b.onclick = () => documentosFactoring(busca(b.dataset.fd), reload));
   $app.querySelectorAll('[data-fa]').forEach(b => b.onclick = async () => { if (await liquidacionAbonos(busca(b.dataset.fa))) reload(); });
   $app.querySelectorAll('[data-fx]').forEach(b => b.onclick = async () => {
     const c = busca(b.dataset.fx);
@@ -1569,6 +1573,69 @@ async function liquidacionAbonos(c){
       } catch (err) { btn.disabled = false; showErr(err.message); }
     };
   });
+}
+
+// evidencias de cada factoring (carta recibida, liquidación, depósitos, confirmación…)
+const TIPO_DOC_FACT = { CARTA_RECIBIDA:'Carta con cargo / recibida', LIQUIDACION:'Liquidación del factoring', DEPOSITO:'Constancia de depósito', CONFIRMACION:'Confirmación del cliente', FACTURA:'Factura / XML / CDR', OTRO:'Otro' };
+const ACEPTA_EVID = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.doc,.docx,.xls,.xlsx,.xml,.zip,image/*,application/pdf';
+async function documentosFactoring(c, reload){
+  const { data: docs0 } = await sb.from('factoring_documentos').select('*').eq('carta_id', c.id).order('creado_at');
+  const docs = docs0 || [];
+  const urls = await firmarUrls(docs);
+  $modal.innerHTML = `<div class="ov"><form class="modal" novalidate style="max-width:780px">
+    <header><h2>📎 Documentos · carta ${esc(codigoCorto(c))} · factura ${esc(c.numero_factura)}</h2><button type="button" class="link" data-x>✕</button></header>
+    <div class="body">
+      <div class="tbl-wrap"><table><thead><tr><th>Tipo</th><th>Archivo</th><th>Subido</th><th></th></tr></thead><tbody>
+        ${docs.map(d => `<tr><td>${esc(TIPO_DOC_FACT[d.tipo] || d.tipo)}${d.descripcion ? `<div class="small">${esc(d.descripcion)}</div>` : ''}</td>
+          <td>${urls[d.storage_path] ? `<a href="${esc(urls[d.storage_path])}" target="_blank" rel="noopener"${esImg(d) || /pdf/.test(d.mime || '') ? '' : ` download="${esc(d.nombre)}"`}><span class="doc-tag ${esWord(d) ? 'w' : 'p'}">${tipoDoc(d)}</span> ${esc(d.nombre)}</a>` : esc(d.nombre)}<div class="small">${d.tamano ? kb(d.tamano) : ''}</div></td>
+          <td class="small" style="white-space:nowrap">${fdate(d.creado_at)}</td>
+          <td style="text-align:right"><button type="button" class="link sm danger" data-dd="${d.id}">Quitar</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">Aún no hay documentos. Sube la carta con cargo de recepción, la liquidación, las constancias de depósito, etc.</td></tr>'}
+      </tbody></table></div>
+      <div class="fsec">Subir evidencia</div>
+      <div class="fgrid">
+        <label class="f"><span>Tipo de documento</span><select name="tipo">${Object.entries(TIPO_DOC_FACT).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+        <label class="f"><span>Descripción (opcional)</span><input name="desc" placeholder="Ej. Liquidación N° 41788 · depósito 15/10"></label>
+        <label class="f full"><span>Archivos (PDF, foto, Word, Excel, XML o ZIP · puedes elegir varios)</span><input type="file" name="f" multiple accept="${ACEPTA_EVID}"></label>
+      </div>
+      <p class="small">Límite: 25 MB por archivo. Solo los usuarios del Maestro pueden ver estos documentos.</p>
+      <div class="small prog"></div><div class="err" hidden></div>
+    </div>
+    <footer><button type="button" data-x>Cerrar</button><button class="pri" type="submit">Subir</button></footer></form></div>`;
+  const form = $modal.querySelector('form');
+  const cerrar = () => { $modal.innerHTML = ''; reload(); };
+  $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = cerrar);
+  $modal.querySelectorAll('[data-dd]').forEach(b => b.onclick = async () => {
+    const d = docs.find(x => x.id === b.dataset.dd);
+    if (!confirm(`¿Quitar "${d.nombre}"? Se borra el archivo.`)) return;
+    const r = await sb.from('factoring_documentos').delete().eq('id', d.id);
+    if (r.error) return toast(r.error.message);
+    await sb.storage.from(BUCKET).remove([d.storage_path]);
+    toast('Documento quitado'); documentosFactoring(c, reload);
+  });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const files = [...form.f.files];
+    const showErr = (m) => { const x = form.querySelector('.err'); x.hidden = false; x.textContent = m; };
+    if (!files.length) return showErr('Elige al menos un archivo.');
+    const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+    const prog = form.querySelector('.prog'); const errs = [];
+    for (let k = 0; k < files.length; k++) {
+      prog.textContent = `Subiendo ${k + 1} de ${files.length}…`;
+      let f = await comprimir(files[k]);
+      const ext = (f.name.split('.').pop() || '').toLowerCase();
+      if (!f.type && MIME_EXT[ext]) f = new File([f], f.name, { type: MIME_EXT[ext] });
+      if (f.type === 'text/xml') f = new File([f], f.name, { type: 'application/xml' });
+      if (f.size > 25 * 1024 * 1024) { errs.push(`${f.name}: supera 25 MB`); continue; }
+      const path = `factoring/${c.id}/${Date.now()}_${k}_${limpiarNombre(f.name)}`;
+      const up = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
+      if (up.error) { errs.push(`${f.name}: ${/mime/i.test(up.error.message) ? 'tipo de archivo no permitido' : up.error.message}`); continue; }
+      const ins = await sb.from('factoring_documentos').insert({ carta_id: c.id, tipo: form.tipo.value, storage_path: path, nombre: f.name, mime: f.type, tamano: f.size, descripcion: val(form.desc.value.trim()) });
+      if (ins.error) { await sb.storage.from(BUCKET).remove([path]); errs.push(`${f.name}: ${ins.error.message}`); }
+    }
+    if (errs.length) { btn.disabled = false; prog.textContent = ''; showErr(errs.join(' · ')); return; }
+    toast(files.length > 1 ? `${files.length} documentos subidos` : 'Documento subido');
+    documentosFactoring(c, reload);
+  };
 }
 
 // configuración: firma, factorings y clientes destinatarios
