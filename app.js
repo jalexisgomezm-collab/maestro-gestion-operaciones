@@ -101,6 +101,7 @@ function shell(inner){
     <div class="sp"></div>
     ${LAB() ? `<span class="badge b-pi" style="margin-right:4px">${VE_GUIAS ? 'Vista técnica' : 'Laboratorio'}</span>`+'<a href="#/" style="color:#fff;font-size:13px;font-weight:500">Servicios</a>' : ''}
     <a href="#/informes" style="color:#fff;font-size:13px;font-weight:500">Informes técnicos</a>
+    ${LAB() ? '' : '<a href="#/factoring" style="color:#fff;font-size:13px;font-weight:500">Factoring</a>'}
     <a href="${OC_APP}" target="_blank" rel="noopener" style="color:#cbd5e1;font-size:13px">Sistema OC ↗</a>
     <span class="user">${esc(session?.user?.email)}</span>
     <button class="sm" id="logout">Salir</button></header><main>${inner}</main>`;
@@ -624,7 +625,7 @@ async function panelCotizacion(s){
 let tabActual = 'componentes';
 async function renderDetalle(id){
   $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
-  const [p, comp, guias, facts, ocs, sols, arch, infs] = await Promise.all([
+  const [p, comp, guias, facts, ocs, sols, arch, infs, cesiones] = await Promise.all([
     sb.from('proyectos_maestro').select('*').eq('id', id).single(),
     sb.from('proyecto_componentes').select('*').eq('proyecto_id', id).order('created_at'),
     sb.from('proyecto_guias').select('*').eq('proyecto_id', id).order('fecha'),
@@ -633,6 +634,7 @@ async function renderDetalle(id){
     sb.from('solicitudes_pedido').select('id,numero,area,solicitante,fecha_solicitud,estado,prioridad').eq('proyecto_id', id).order('numero'),
     sb.from('proyecto_archivos').select('*').eq('proyecto_id', id).order('created_at'),
     sb.from('informes_tecnicos').select('*, informe_archivos(*)').eq('proyecto_id', id).order('numero'),
+    sb.from('factoring_cartas').select('id,factura_id,numero,anio,sigla,estado,entidad_nombre').eq('proyecto_id', id).neq('estado', 'ANULADA'),
   ]);
   if (p.error) { $app.querySelector('main').innerHTML = `<a class="back" href="#/">← Volver</a><div class="err">No se encontró el servicio.</div>`; return; }
   const s = p.data, C = comp.data||[], G = guias.data||[], F = facts.data||[], O = ocs.data||[], S = sols.data||[];
@@ -773,10 +775,11 @@ async function renderDetalle(id){
       { k:'observacion', l:'Observación', full:true },
     ];
     const hoy = new Date().toISOString().slice(0,10);
-    T.innerHTML = `<div class="sec-head"><div class="small">Facturas emitidas al cliente por este servicio y si ya se cobraron.</div><button class="pri sm" data-add>+ Registrar factura</button></div>
+    T.innerHTML = `<div class="sec-head"><div class="small">Facturas emitidas al cliente por este servicio y si ya se cobraron. Para ceder una factura al factoring usa <a href="#/factoring">Factoring</a>.</div><button class="pri sm" data-add>+ Registrar factura</button></div>
       <div class="tbl-wrap"><table><thead><tr><th>N° factura</th><th>Emisión</th><th>Vence</th><th style="text-align:right">Monto</th><th style="text-align:right">Cobrado</th><th>Estado</th><th>Fecha cobro</th><th>PDF / XML</th><th></th></tr></thead><tbody>
       ${F.map((f,i)=>{ const venc = f.fecha_vencimiento && f.fecha_vencimiento < hoy && (f.estado_cobro==='PENDIENTE'||f.estado_cobro==='PARCIAL');
-        return `<tr><td class="mono">${esc(f.numero_factura)}${f.observacion?`<div class="small">${esc(f.observacion)}</div>`:''}</td><td>${fdate(f.fecha_emision)}</td><td>${fdate(f.fecha_vencimiento)}${venc?' <span class="badge b-PENDIENTE">Vencida</span>':''}</td><td class="money">${money(f.monto,f.moneda)}</td><td class="money">${money(f.monto_cobrado,f.moneda)}</td><td>${badge(f.estado_cobro, EST_COBRO[f.estado_cobro])}${f.estado_cobro!=='COBRADO'&&f.estado_cobro!=='ANULADA'?` <button class="link sm" data-c="${i}">Marcar cobrada</button>`:''}</td><td>${fdate(f.fecha_cobro)}</td><td class="small" style="white-space:nowrap">${archFactura(A.filter(a=>a.factura_id===f.id), urls, f.id)}</td>${actions(i)}</tr>`; }).join('') || '<tr><td colspan="9" class="empty">Aún no se registra factura para este servicio.</td></tr>'}
+        const ces = (cesiones.data||[]).filter(x => x.factura_id === f.id);
+        return `<tr><td class="mono">${esc(f.numero_factura)}${ces.map(x => ` <a href="#/factoring" class="badge b-PARCIAL" title="Cedida a ${esc(x.entidad_nombre)}">Factoring · carta ${esc(codigoCorto(x))}</a>`).join('')}${f.observacion?`<div class="small">${esc(f.observacion)}</div>`:''}</td><td>${fdate(f.fecha_emision)}</td><td>${fdate(f.fecha_vencimiento)}${venc?' <span class="badge b-PENDIENTE">Vencida</span>':''}</td><td class="money">${money(f.monto,f.moneda)}</td><td class="money">${money(f.monto_cobrado,f.moneda)}</td><td>${badge(f.estado_cobro, EST_COBRO[f.estado_cobro])}${f.estado_cobro!=='COBRADO'&&f.estado_cobro!=='ANULADA'?` <button class="link sm" data-c="${i}">Marcar cobrada</button>`:''}</td><td>${fdate(f.fecha_cobro)}</td><td class="small" style="white-space:nowrap">${archFactura(A.filter(a=>a.factura_id===f.id), urls, f.id)}</td>${actions(i)}</tr>`; }).join('') || '<tr><td colspan="9" class="empty">Aún no se registra factura para este servicio.</td></tr>'}
       </tbody></table></div>`;
     wire(F, 'proyecto_facturas', fields, 'factura', {}, (r) => A.filter(a => a.factura_id === r.id));
     bindArchivos(T, A, urls, id, reload);
@@ -1284,6 +1287,326 @@ async function abrirRotulo({ s, C, G, F }){
   };
 }
 
+// ---------- FACTORING: cartas de cesión de facturas ----------
+const EST_FACT = { EMITIDA:'Emitida · por abonar', ABONADO:'Abonado', ANULADA:'Anulada' };
+const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const codigoCarta = (c) => `CARTA Nº ${String(c.numero).padStart(2, '0')} -${c.anio}/ ${c.sigla} -GTO`;
+const codigoCorto = (c) => `${String(c.numero).padStart(2, '0')}-${c.anio}/${c.sigla}`;
+const fechaLarga = (d) => { const [y, m, dd] = String(d).slice(0, 10).split('-'); return `${+dd} de ${MESES_ES[+m - 1]} de ${y}`; };
+const fechaPuntos = (d) => d ? String(d).slice(0, 10).split('-').reverse().join('.') : '—';
+const importeCarta = (n, m) => (m === 'DOLARES' ? '$' : 'S/ ') + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+let filtroFact = { estado: 'ACTIVAS', q: '' };
+
+async function cargarFactoring(){
+  const [c, e, d, cfg] = await Promise.all([
+    sb.from('factoring_cartas').select('*, proyectos:proyecto_id(numero_orden_trabajo,numero_oc_cliente,nombre)').order('fecha', { ascending: false }).order('numero', { ascending: false }),
+    sb.from('factoring_entidades').select('*').order('nombre'),
+    sb.from('factoring_destinatarios').select('*').order('razon_social'),
+    sb.from('factoring_config').select('*').eq('id', 1).maybeSingle(),
+  ]);
+  if (c.error) throw new Error(c.error.message);
+  return { cartas: c.data || [], entidades: e.data || [], destinatarios: d.data || [], config: cfg.data || { id: 1, lugar: 'Arequipa' } };
+}
+
+async function renderFactoring(){
+  $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
+  let D;
+  try { D = await cargarFactoring(); } catch (e) { $app.querySelector('main').innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const { cartas } = D;
+  const vig = cartas.filter(c => c.estado !== 'ANULADA');
+  const suma = (l, f) => { const r = {}; l.forEach(c => { const v = f(c); if (v != null) r[c.moneda] = (r[c.moneda] || 0) + Number(v); }); return Object.entries(r).map(([m, v]) => money(v, m)).join(' · ') || '—'; };
+  const porRecibir = vig.filter(c => c.estado === 'EMITIDA');
+  const sinNeto = porRecibir.filter(c => c.neto_recibir == null).length;
+  const kpi = (n, l) => `<div class="kpi" style="cursor:default"><div class="n" style="font-size:18px">${n}</div><div class="l">${l}</div></div>`;
+  const q = filtroFact.q.toLowerCase();
+  const rows = cartas.filter(c => (filtroFact.estado === 'TODAS' || (filtroFact.estado === 'ACTIVAS' ? c.estado !== 'ANULADA' : c.estado === filtroFact.estado)) &&
+    (!q || [codigoCorto(c), c.cliente_razon, c.numero_factura, c.entidad_nombre, c.proyectos?.numero_orden_trabajo, c.proyectos?.numero_oc_cliente].some(x => String(x || '').toLowerCase().includes(q))));
+  $app.querySelector('main').innerHTML = `
+    <div class="row" style="justify-content:space-between">
+      <div><h1>Factoring · Cartas de cesión</h1><div class="sub">Cartas de cesión de facturas al factoring, vinculadas a la OT / OC del cliente. El neto a recibir alimenta el presupuesto de GTO Finanzas.</div></div>
+      <div class="row"><button id="fac-cfg">⚙ Configuración</button><button class="pri" id="fac-nueva">+ Nueva carta</button></div>
+    </div>
+    ${D.config.firma_imagen ? '' : '<div class="err" style="margin-top:12px">Falta cargar la imagen de firma y sello de Gerencia General. Entra a ⚙ Configuración para subirla (las cartas saldrán sin firma hasta entonces).</div>'}
+    <div class="kpis">${kpi(vig.length, 'Cartas emitidas')}${kpi(suma(vig, c => c.importe), 'Importe cedido')}${kpi(suma(porRecibir, c => c.neto_recibir), 'Neto por recibir' + (sinNeto ? ` · ${sinNeto} sin neto` : ''))}${kpi(suma(vig.filter(c => c.estado === 'ABONADO'), c => c.neto_recibir), 'Neto ya abonado')}${kpi(suma(vig.filter(c => c.neto_recibir != null), c => c.importe - c.neto_recibir), 'Costo del factoring')}</div>
+    <div class="panel">
+      <div class="toolbar">
+        <input type="search" id="fac-q" placeholder="Buscar carta, cliente, factura, OT u OC…" value="${esc(filtroFact.q)}">
+        <select id="fac-est">${[['ACTIVAS','Vigentes'],['EMITIDA','Por abonar'],['ABONADO','Abonadas'],['ANULADA','Anuladas'],['TODAS','Todas']].map(([k, l]) => `<option value="${k}" ${filtroFact.estado === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <div style="flex:1"></div><span class="small">${rows.length} carta(s)</span>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>Carta</th><th>Fecha</th><th>Cliente</th><th>OT / OC</th><th>Factura</th><th style="text-align:right">Importe</th><th>Vence</th><th>Factoring</th><th style="text-align:right">Neto a recibir</th><th>Abono</th><th>Estado / acciones</th></tr></thead>
+      <tbody>${rows.map(c => `<tr>
+        <td class="mono" style="white-space:nowrap;font-weight:500">${esc(codigoCorto(c))}</td>
+        <td style="white-space:nowrap">${fdate(c.fecha)}</td>
+        <td class="small" style="color:var(--ink);min-width:130px">${esc(c.cliente_razon)}</td>
+        <td style="white-space:nowrap">${c.proyecto_id ? `<a class="mono" href="#/servicio/${c.proyecto_id}">${esc(c.proyectos?.numero_orden_trabajo || 'OT')}</a>${c.proyectos?.numero_oc_cliente ? `<div class="small">OC ${esc(c.proyectos.numero_oc_cliente)}</div>` : ''}` : '<span class="small">Sin OT</span>'}</td>
+        <td class="mono" style="white-space:nowrap">${esc(c.numero_factura)}</td>
+        <td class="money" style="white-space:nowrap">${money(c.importe, c.moneda)}</td>
+        <td style="white-space:nowrap">${fdate(c.fecha_vencimiento)}</td>
+        <td class="small" style="color:var(--ink)">${esc(c.entidad_nombre)}</td>
+        <td class="money" style="white-space:nowrap">${c.neto_recibir != null ? money(c.neto_recibir, c.moneda) : '<span class="small">Por definir</span>'}${c.neto_recibir != null && c.importe ? `<div class="small">Costo ${money(c.importe - c.neto_recibir, c.moneda)}</div>` : ''}</td>
+        <td style="white-space:nowrap">${fdate(c.fecha_abono)}</td>
+        <td style="min-width:170px">${badge(c.estado === 'ABONADO' ? 'COBRADO' : c.estado === 'ANULADA' ? 'ANULADA' : 'PENDIENTE', EST_FACT[c.estado])}
+          <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:0 2px">
+          <button class="link sm" data-fp="${c.id}">Imprimir</button>
+          <button class="link sm" data-fe="${c.id}">Editar</button>
+          ${c.estado === 'EMITIDA' ? `<button class="link sm" data-fa="${c.id}">Registrar abono</button>` : ''}
+          ${c.estado !== 'ANULADA' ? `<button class="link sm danger" data-fx="${c.id}">Anular</button>` : ''}
+        </div></td></tr>`).join('') || '<tr><td colspan="11" class="empty">No hay cartas con este filtro.</td></tr>'}</tbody></table></div>
+    </div>`;
+  const reload = () => renderFactoring();
+  const busca = (id) => cartas.find(c => c.id === id);
+  document.getElementById('fac-nueva').onclick = async () => { if (await editarCarta(null, D)) reload(); };
+  document.getElementById('fac-cfg').onclick = () => configFactoring(D, reload);
+  document.getElementById('fac-q').oninput = (e) => { filtroFact.q = e.target.value; clearTimeout(window._fq); window._fq = setTimeout(() => renderFactoring().then(() => { const i = document.getElementById('fac-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
+  document.getElementById('fac-est').onchange = (e) => { filtroFact.estado = e.target.value; reload(); };
+  $app.querySelectorAll('[data-fp]').forEach(b => b.onclick = () => imprimirCarta(busca(b.dataset.fp), D.config));
+  $app.querySelectorAll('[data-fe]').forEach(b => b.onclick = async () => { if (await editarCarta(busca(b.dataset.fe), D)) reload(); });
+  $app.querySelectorAll('[data-fa]').forEach(b => b.onclick = async () => { if (await registrarAbono(busca(b.dataset.fa))) reload(); });
+  $app.querySelectorAll('[data-fx]').forEach(b => b.onclick = async () => {
+    const c = busca(b.dataset.fx);
+    if (!await confirmModal(`¿Anular la carta ${codigoCorto(c)}? Queda en el historial como anulada y ya no se considera en el presupuesto. El número no se reutiliza.`)) return;
+    const { error } = await sb.from('factoring_cartas').update({ estado: 'ANULADA' }).eq('id', c.id); error ? toast(error.message) : (toast('Carta anulada'), reload());
+  });
+}
+
+// formulario de carta (nueva o edición)
+async function editarCarta(carta, D){
+  const { entidades, destinatarios, config } = D;
+  const ents = entidades.filter(e => e.activo || e.id === carta?.entidad_id);
+  const dests = destinatarios.filter(d => d.activo || d.id === carta?.destinatario_id);
+  if (!ents.length || !dests.length) { toast('Primero registra el factoring y el cliente destinatario en ⚙ Configuración'); return false; }
+  // OT con facturas (para vincular la carta a la OC del cliente)
+  const [pr, fa] = await Promise.all([
+    sb.from('proyectos_maestro').select('id,numero_orden_trabajo,numero_oc_cliente,cliente,nombre,clase').neq('clase', 'INTERNO').order('numero_orden_trabajo', { ascending: false }),
+    sb.from('proyecto_facturas').select('id,proyecto_id,numero_factura,moneda,monto,fecha_emision,fecha_vencimiento,estado_cobro').neq('estado_cobro', 'ANULADA'),
+  ]);
+  const P = pr.data || [], F = fa.data || [];
+  const cedidas = new Set(D.cartas.filter(c => c.estado !== 'ANULADA' && c.id !== carta?.id && c.factura_id).map(c => c.factura_id));
+  const norm = (x) => String(x || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '');
+  const destDe = (cliente) => dests.find(d => { const a = norm(d.razon_social), b = norm(cliente); return a && b && (a.includes(b.slice(0, 12)) || b.includes(a.slice(0, 12))); });
+  const conFact = P.filter(p => F.some(f => f.proyecto_id === p.id));
+  const c0 = carta || {};
+  const hoy = new Date().toISOString().slice(0, 10);
+  const opt = (v, l, sel) => `<option value="${esc(v)}" ${sel ? 'selected' : ''}>${esc(l)}</option>`;
+  const lab = (t, html, full = false) => `<label class="f ${full ? 'full' : ''}"><span>${t}</span>${html}</label>`;
+  $modal.innerHTML = `<div class="ov"><form class="modal" novalidate style="max-width:820px">
+    <header><h2>${carta ? 'Editar carta ' + esc(codigoCorto(carta)) : 'Nueva carta de cesión (factoring)'}</h2><button type="button" class="link" data-x>✕</button></header>
+    <div class="body"><div class="fgrid">
+      <div class="fsec">Servicio y factura</div>
+      ${lab('OT / OC del cliente', `<select name="proyecto_id"><option value="">— Sin OT (factura manual) —</option>${conFact.map(p => opt(p.id, `${p.numero_orden_trabajo || ''} · ${p.cliente || ''}${p.numero_oc_cliente ? ' · OC ' + p.numero_oc_cliente : ''}`, p.id === c0.proyecto_id)).join('')}</select>`, true)}
+      ${lab('Factura de la OT', `<select name="factura_id"><option value="">— Escribir manualmente —</option></select>`, true)}
+      ${lab('N° de factura *', `<input name="numero_factura" value="${esc(c0.numero_factura || '')}" placeholder="E001-482" required>`)}
+      ${lab('Moneda', `<select name="moneda">${opt('DOLARES', 'Dólares', (c0.moneda || 'DOLARES') === 'DOLARES')}${opt('SOLES', 'Soles', c0.moneda === 'SOLES')}</select>`)}
+      ${lab('Importe de la factura (con IGV) *', `<input name="importe" type="number" step="any" value="${esc(c0.importe ?? '')}" required>`)}
+      ${lab('Fecha de vencimiento', `<input name="fecha_vencimiento" type="date" value="${esc(c0.fecha_vencimiento || '')}">`)}
+      <div class="fsec">Carta</div>
+      ${lab('Dirigida a (cliente) *', `<select name="destinatario_id">${dests.map(d => opt(d.id, `${d.razon_social} (${d.sigla})`, d.id === c0.destinatario_id)).join('')}</select>`)}
+      ${lab('Atención', `<input name="atencion" value="${esc(c0.atencion || '')}" placeholder="SRA. … - JEFE DE FINANZAS">`)}
+      ${lab('Factoring (a quién se paga) *', `<select name="entidad_id">${ents.map(e => opt(e.id, `${e.nombre}${e.ruc ? ' · RUC ' + e.ruc : ''}`, e.id === c0.entidad_id)).join('')}</select>`)}
+      ${lab('Fecha de la carta', `<input name="fecha" type="date" value="${esc(c0.fecha || hoy)}">`)}
+      ${lab('Lugar', `<input name="lugar" value="${esc(c0.lugar || config.lugar || 'Arequipa')}">`)}
+      ${lab('N° de carta', `<input name="numero" type="number" min="1" value="${esc(c0.numero ?? '')}" placeholder="Automático">`)}
+      <div class="fsec">Lo que se recibirá (para el presupuesto)</div>
+      ${lab('Neto a recibir del factoring', `<input name="neto_recibir" type="number" step="any" value="${esc(c0.neto_recibir ?? '')}" placeholder="Lo que deposita el factoring">`)}
+      ${lab('Fecha de abono (estimada o real)', `<input name="fecha_abono" type="date" value="${esc(c0.fecha_abono || '')}">`)}
+      ${lab('Observación', `<input name="observacion" value="${esc(c0.observacion || '')}">`, true)}
+    </div><div class="small" id="fc-info" style="margin-top:8px"></div><div class="err" hidden></div></div>
+    <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">${carta ? 'Guardar' : 'Guardar e imprimir carta'}</button></footer></form></div>`;
+  const form = $modal.querySelector('form');
+  const el = (n) => form.elements[n];
+  const info = form.querySelector('#fc-info');
+  const showErr = (m) => { const e = form.querySelector('.err'); e.hidden = false; e.textContent = m; };
+  const actualizaInfo = () => {
+    const imp = +el('importe').value, neto = el('neto_recibir').value === '' ? null : +el('neto_recibir').value;
+    const d = dests.find(x => x.id === el('destinatario_id').value);
+    const sig = d ? d.sigla : '';
+    const anio = (el('fecha').value || hoy).slice(0, 4);
+    const prox = el('numero').value || (Math.max(0, ...D.cartas.filter(c => c.sigla === sig && String(c.anio) === anio).map(c => c.numero)) + 1);
+    info.innerHTML = `Saldrá como <b class="mono">CARTA Nº ${String(prox).padStart(2, '0')} -${anio}/ ${esc(sig)} -GTO</b>` + (imp && neto != null ? ` · Costo del factoring: <b>${money(imp - neto, el('moneda').value)}</b> (${(100 * (imp - neto) / imp).toFixed(2)}%)` : '');
+  };
+  const llenarFacturas = (keep) => {
+    const pid = el('proyecto_id').value;
+    const lf = F.filter(f => f.proyecto_id === pid);
+    el('factura_id').innerHTML = `<option value="">— Escribir manualmente —</option>` + lf.map(f => opt(f.id, `${f.numero_factura} · ${money(f.monto, f.moneda)}${f.fecha_vencimiento ? ' · vence ' + fdate(f.fecha_vencimiento) : ''}${cedidas.has(f.id) ? ' · YA CEDIDA' : ''}`, keep ? f.id === c0.factura_id : false)).join('');
+    if (!keep && lf.length === 1) { el('factura_id').value = lf[0].id; aplicarFactura(); }
+    const p = P.find(x => x.id === pid);
+    if (p && !keep) { const d = destDe(p.cliente); if (d) { el('destinatario_id').value = d.id; aplicarDest(); } }
+  };
+  const aplicarFactura = () => {
+    const f = F.find(x => x.id === el('factura_id').value); if (!f) return;
+    el('numero_factura').value = f.numero_factura || ''; el('moneda').value = f.moneda || 'DOLARES';
+    el('importe').value = f.monto ?? ''; el('fecha_vencimiento').value = f.fecha_vencimiento || '';
+    actualizaInfo();
+  };
+  const aplicarDest = () => { const d = dests.find(x => x.id === el('destinatario_id').value); if (d) el('atencion').value = [d.atencion, d.cargo].filter(Boolean).join(' - '); actualizaInfo(); };
+  llenarFacturas(true);
+  if (!carta) aplicarDest();
+  el('proyecto_id').onchange = () => llenarFacturas(false);
+  el('factura_id').onchange = aplicarFactura;
+  el('destinatario_id').onchange = aplicarDest;
+  ['importe', 'neto_recibir', 'moneda', 'fecha', 'numero'].forEach(n => el(n).addEventListener('input', actualizaInfo));
+  actualizaInfo();
+  return new Promise(resolve => {
+    const close = (r) => { $modal.innerHTML = ''; resolve(r); };
+    $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = () => close(false));
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const v = (n) => el(n).value.trim();
+      if (!v('numero_factura')) return showErr('Completa el N° de factura.');
+      if (!(+v('importe') > 0)) return showErr('Completa el importe de la factura.');
+      if (v('factura_id') && cedidas.has(v('factura_id')) && !await new Promise(r => { r(confirm('Esa factura ya tiene una carta de cesión vigente. ¿Emitir otra de todas formas?')); })) return;
+      const d = dests.find(x => x.id === v('destinatario_id')), en = ents.find(x => x.id === v('entidad_id'));
+      const fecha = v('fecha') || hoy;
+      const row = {
+        proyecto_id: val(v('proyecto_id')), factura_id: val(v('factura_id')),
+        numero_factura: v('numero_factura').toUpperCase(), moneda: v('moneda'), importe: +v('importe'), fecha_vencimiento: val(v('fecha_vencimiento')),
+        destinatario_id: d.id, cliente_razon: d.razon_social, sigla: d.sigla, atencion: val(v('atencion')),
+        entidad_id: en.id, entidad_nombre: en.nombre, entidad_ruc: en.ruc, entidad_telefono: en.telefono, entidad_correo: en.correo,
+        fecha, anio: +fecha.slice(0, 4), lugar: v('lugar') || 'Arequipa',
+        neto_recibir: v('neto_recibir') === '' ? null : +v('neto_recibir'), fecha_abono: val(v('fecha_abono')), observacion: val(v('observacion')),
+      };
+      if (v('numero')) row.numero = +v('numero'); else if (!carta) row.numero = null;
+      const w = carta ? null : window.open('about:blank', '_blank');
+      const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+      const r = carta ? await sb.from('factoring_cartas').update(row).eq('id', carta.id).select().single()
+                      : await sb.from('factoring_cartas').insert(row).select().single();
+      if (r.error) { if (w) w.close(); btn.disabled = false; return showErr(/duplicate|unique/i.test(r.error.message) ? 'Ese N° de carta ya existe para este cliente y año.' : r.error.message); }
+      if (w) imprimirCarta(r.data, config, w);
+      toast(carta ? 'Carta actualizada' : `Carta ${codigoCorto(r.data)} emitida`);
+      close(true);
+    };
+  });
+}
+
+async function registrarAbono(c){
+  const hoy = new Date().toISOString().slice(0, 10);
+  return formModal({
+    title: `Registrar abono · carta ${codigoCorto(c)}`,
+    fields: [
+      { k: 'neto_recibir', l: `Neto abonado por ${c.entidad_nombre} (${c.moneda === 'DOLARES' ? 'US$' : 'S/'})`, t: 'number', req: true, def: c.neto_recibir ?? '' },
+      { k: 'fecha_abono', l: 'Fecha del abono', t: 'date', req: true, def: c.fecha_abono && c.fecha_abono <= hoy ? c.fecha_abono : hoy },
+      { k: 'marcar', l: 'Marcar la factura como cobrada en la OT', t: 'select', opts: [['SI', 'Sí'], ['NO', 'No']], def: c.factura_id ? 'SI' : 'NO' },
+    ],
+    data: {},
+    onSave: async (d) => {
+      chk(await sb.from('factoring_cartas').update({ estado: 'ABONADO', neto_recibir: d.neto_recibir, fecha_abono: d.fecha_abono }).eq('id', c.id));
+      if (d.marcar === 'SI' && c.factura_id) chk(await sb.from('proyecto_facturas').update({ estado_cobro: 'COBRADO', monto_cobrado: c.importe, fecha_cobro: d.fecha_abono, observacion: `Cedida a ${c.entidad_nombre} · carta ${codigoCorto(c)}` }).eq('id', c.factura_id));
+      toast('Abono registrado');
+    },
+  });
+}
+
+// configuración: firma, factorings y clientes destinatarios
+function configFactoring(D, reload){
+  const { entidades, destinatarios, config } = D;
+  $modal.innerHTML = `<div class="ov"><div class="modal" style="max-width:820px">
+    <header><h2>Configuración de factoring</h2><button type="button" class="link" data-x>✕</button></header>
+    <div class="body">
+      <div class="fsec" style="margin-top:0">Firma y sello de Gerencia General</div>
+      <div class="row" style="align-items:flex-start">
+        <div style="border:1px dashed var(--line);border-radius:6px;padding:8px;min-width:240px;min-height:90px;display:flex;align-items:center;justify-content:center;background:#fff">${config.firma_imagen ? `<img src="${esc(config.firma_imagen)}" style="max-width:260px;max-height:130px">` : '<span class="small">Sin firma cargada</span>'}</div>
+        <div><input type="file" id="cfg-firma" accept="image/png,image/jpeg" style="width:auto"><div class="small" style="margin-top:4px">PNG con fondo transparente (recomendado) o JPG. Se inserta sola en cada carta.</div>
+        ${config.firma_imagen ? '<button class="link sm danger" id="cfg-firma-del" style="margin-top:6px">Quitar firma</button>' : ''}</div>
+      </div>
+      <div class="fsec">Empresas de factoring</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>RUC</th><th>Teléfono</th><th>Correo</th><th></th></tr></thead><tbody>
+        ${entidades.map((e, i) => `<tr style="${e.activo ? '' : 'opacity:.5'}"><td>${esc(e.nombre)}</td><td class="mono">${esc(e.ruc || '—')}</td><td>${esc(e.telefono || '—')}</td><td>${esc(e.correo || '—')}</td><td style="text-align:right;white-space:nowrap"><button class="link sm" data-ee="${i}">Editar</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin registros</td></tr>'}
+      </tbody></table></div><button class="sm" id="cfg-ent-add" style="margin-top:6px">+ Agregar factoring</button>
+      <div class="fsec">Clientes destinatarios (a quién va dirigida la carta)</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Razón social</th><th>Sigla</th><th>Atención</th><th>Cargo</th><th></th></tr></thead><tbody>
+        ${destinatarios.map((d, i) => `<tr style="${d.activo ? '' : 'opacity:.5'}"><td>${esc(d.razon_social)}</td><td class="mono">${esc(d.sigla)}</td><td>${esc(d.atencion || '—')}</td><td>${esc(d.cargo || '—')}</td><td style="text-align:right;white-space:nowrap"><button class="link sm" data-de="${i}">Editar</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin registros</td></tr>'}
+      </tbody></table></div><button class="sm" id="cfg-dest-add" style="margin-top:6px">+ Agregar cliente</button>
+      <div class="small" style="margin-top:6px">La sigla va en el número de carta (CARTA Nº 07 -2026/ <b>SHP</b> -GTO) y cada cliente lleva su propio correlativo por año.</div>
+    </div>
+    <footer><button type="button" data-x>Cerrar</button></footer></div></div>`;
+  const cerrar = () => { $modal.innerHTML = ''; reload(); };
+  $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = cerrar);
+  const reabrir = async () => { const nd = await cargarFactoring(); Object.assign(D, nd); configFactoring(D, reload); };
+  document.getElementById('cfg-firma').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const url = await reducirImagen(f, 1000);
+      chk(await sb.from('factoring_config').upsert({ id: 1, firma_imagen: url, actualizado_at: new Date().toISOString() }));
+      toast('Firma guardada'); reabrir();
+    } catch (err) { toast(err.message); }
+  };
+  const del = document.getElementById('cfg-firma-del');
+  if (del) del.onclick = async () => { if (!await confirmModal('¿Quitar la firma? Las cartas saldrán sin firma.')) return reabrir(); chk(await sb.from('factoring_config').update({ firma_imagen: null }).eq('id', 1)); reabrir(); };
+  const fEnt = [{ k: 'nombre', l: 'Razón social', req: true, full: true }, { k: 'ruc', l: 'RUC' }, { k: 'telefono', l: 'Teléfono' }, { k: 'correo', l: 'Correo' }, { k: 'activo', l: 'Estado', t: 'select', opts: [['true', 'Activo'], ['false', 'Inactivo']], def: 'true' }];
+  const fDest = [{ k: 'razon_social', l: 'Razón social del cliente', req: true, full: true }, { k: 'sigla', l: 'Sigla (para el N° de carta)', req: true, ph: 'SHP' }, { k: 'atencion', l: 'Atención (nombre)', ph: 'SRA. GABRIELA OLIVARES' }, { k: 'cargo', l: 'Cargo', ph: 'JEFE DE FINANZAS' }, { k: 'activo', l: 'Estado', t: 'select', opts: [['true', 'Activo'], ['false', 'Inactivo']], def: 'true' }];
+  const guardar = (tabla, fields, row) => formModal({ title: row ? 'Editar' : 'Agregar', fields, data: row ? { ...row, activo: String(row.activo) } : {}, onSave: async (d) => {
+    d.activo = d.activo !== 'false'; if (d.sigla) d.sigla = d.sigla.toUpperCase();
+    chk(row ? await sb.from(tabla).update(d).eq('id', row.id) : await sb.from(tabla).insert(d));
+  } }).then(reabrir);
+  document.getElementById('cfg-ent-add').onclick = () => guardar('factoring_entidades', fEnt, null);
+  document.getElementById('cfg-dest-add').onclick = () => guardar('factoring_destinatarios', fDest, null);
+  $modal.querySelectorAll('[data-ee]').forEach(b => b.onclick = () => guardar('factoring_entidades', fEnt, entidades[b.dataset.ee]));
+  $modal.querySelectorAll('[data-de]').forEach(b => b.onclick = () => guardar('factoring_destinatarios', fDest, destinatarios[b.dataset.de]));
+}
+function reducirImagen(file, max){
+  return new Promise((resolve, reject) => {
+    if (file.size > 5 * 1024 * 1024) return reject(new Error('La imagen supera 5 MB'));
+    const img = new Image(); const u = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas'); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(u);
+      resolve(cv.toDataURL(file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.9));
+    };
+    img.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    img.src = u;
+  });
+}
+
+// carta imprimible (A4, membrete GTO)
+function htmlCarta(c, config){
+  const e = esc;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${e(codigoCarta(c))} · ${e(c.numero_factura)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+@page{size:A4;margin:0}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+html,body{margin:0;background:#e5e7eb;font-family:Roboto,Arial,sans-serif;color:#111}
+.hoja{width:210mm;height:297mm;margin:10mm auto;background:#fff url('${location.origin}/membrete-gto.jpg') center/210mm 297mm no-repeat;position:relative;padding:47mm 22mm 0 26mm;font-size:11.5pt;line-height:1.45;box-shadow:0 2px 12px rgba(0,0,0,.15)}
+h1{font-size:12.5pt;text-align:center;margin:0 0 9mm;font-weight:700;text-decoration:underline;letter-spacing:.2px}
+p{margin:0 0 3mm}
+.blk{margin-bottom:6mm}
+table{width:100%;border-collapse:collapse;margin:3mm 0 9mm;font-size:10.5pt}
+th{background:#0a9447;color:#fff;font-weight:700;border:1px solid #333;padding:2mm 1.5mm;line-height:1.15}
+td{border:1px solid #333;text-align:center;padding:1.3mm}
+.just{text-align:justify}
+.firma{text-align:center;margin-top:2mm;height:42mm}
+.firma img{max-height:42mm;max-width:80mm;margin-left:30mm}
+a{color:#1155cc}
+.bar{position:fixed;top:0;left:0;right:0;background:#18212b;color:#fff;padding:8px 14px;display:flex;gap:10px;align-items:center;font:13px system-ui;z-index:5}
+.bar button{font:inherit;padding:5px 12px;border-radius:5px;border:0;background:#0f766e;color:#fff;cursor:pointer}
+@media print{html,body{background:#fff}.hoja{margin:0;box-shadow:none}.bar{display:none}}
+</style></head><body>
+<div class="bar"><b>${e(codigoCarta(c))}</b><span style="flex:1"></span><span>Guarda como PDF desde Imprimir</span><button onclick="print()">Imprimir / PDF</button></div>
+<div class="hoja">
+  <h1>${e(codigoCarta(c))}</h1>
+  <p class="blk">${e(c.lugar || 'Arequipa')}, ${e(fechaLarga(c.fecha))}</p>
+  <p>Señor(es):</p>
+  <p>${e(c.cliente_razon)}</p>
+  ${c.atencion ? `<p>Atención: ${e(c.atencion)}</p>` : ''}
+  <p class="blk">Referencia: Factoring - Cesión de Factura / Factura: ${e(c.numero_factura)}</p>
+  <p>De nuestra consideración.</p>
+  <table><thead><tr><th style="width:25%">Nº DE FACTURA</th><th style="width:25%">MONEDA</th><th style="width:25%">IMPORTE</th><th style="width:25%">FECHA DE<br>VENCIMIENTO</th></tr></thead>
+  <tbody><tr><td>${e(c.numero_factura)}</td><td>${c.moneda === 'DOLARES' ? 'DOLARES' : 'SOLES'}</td><td>${e(importeCarta(c.importe, c.moneda))}</td><td>${e(fechaPuntos(c.fecha_vencimiento))}</td></tr></tbody></table>
+  <p class="just blk">Ha sido cedido por su acreedor GTO PERU S.A.C., con Ruc 20519998786, con domicilio fiscal CAL.GERMAN SCHEREIBER NRO. 276 INT. T301 URB. SANTA ANA (ENTRE CUADRA 1 Y 2 DE CANAVAL Y MOREYRA) LIMA - LIMA - SAN ISIDRO.</p>
+  <p class="just blk">El pago deberá efectuarse a ${e(c.entidad_nombre)}${c.entidad_ruc ? ` con RUC. ${e(c.entidad_ruc)}` : ''}.${c.entidad_telefono || c.entidad_correo ? ` Para más información, comunicarse con ${e(String(c.entidad_nombre).replace(/\./g, ''))}${c.entidad_telefono ? ` al teléfono ${e(c.entidad_telefono)}` : ''}${c.entidad_correo ? `, correo electrónico: <a href="mailto:${e(c.entidad_correo)}">${e(c.entidad_correo)}</a>` : ''}` : ''}</p>
+  <p class="blk">Sin otro particular, agradecemos su gentil atención</p>
+  <p>Atentamente</p>
+  <div class="firma">${config?.firma_imagen ? `<img src="${e(config.firma_imagen)}" alt="Firma">` : ''}</div>
+</div></body></html>`;
+}
+function imprimirCarta(c, config, w = null){
+  const win = w || window.open('about:blank', '_blank');
+  if (!win) { toast('El navegador bloqueó la ventana. Permite ventanas emergentes.'); return; }
+  win.document.open(); win.document.write(htmlCarta(c, config)); win.document.close();
+}
+
 // ---------- router ----------
 async function route(){
   $modal.innerHTML = ''; document.onkeydown = null;  // cerrar ventanas abiertas al cambiar de página
@@ -1309,6 +1632,7 @@ async function route(){
   }
   if (m) return renderDetalle(m[1]);
   if (location.hash.startsWith('#/informes')) return renderInformes();
+  if (location.hash.startsWith('#/factoring')) return renderFactoring();
   return renderLista();
 }
 window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/servicio/')) { tabActual = 'componentes'; tabLab = 'componentes'; } route(); });
