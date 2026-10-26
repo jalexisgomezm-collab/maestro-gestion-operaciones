@@ -599,10 +599,15 @@ async function panelCotizacion(s){
     const mon = monedaCot(q.moneda), c = q.condiciones || {};
     const difMonto = s.monto_servicio != null && q.subtotal != null && Math.abs(Number(s.monto_servicio) - Number(q.subtotal)) > 0.01;
     const fila = (k, v) => v ? `<div><span class="k">${k}</span> ${v}</div>` : '';
+    let abierto = false; try { abierto = localStorage.getItem('maestro-cot-abierto') === '1'; } catch {}
+    box.classList.toggle('cerrado', !abierto);
     box.innerHTML = `
-      <div class="cot-head"><b>Cotización ${esc(q.numero)}</b> ${q.estado ? `<span class="badge">${esc(ESTADO_COT[q.estado] || q.estado)}</span>` : ''}
+      <div class="cot-head"><button type="button" class="cot-tog" aria-expanded="${abierto}" title="Mostrar u ocultar los datos de la cotización"><span class="cot-ar">▸</span> <b>Cotización ${esc(q.numero)}</b></button> ${q.estado ? `<span class="badge">${esc(ESTADO_COT[q.estado] || q.estado)}</span>` : ''}
         <span class="small">emitida ${fdate(q.fecha)}${q.vence ? ` · vence ${fdate(q.vence)}` : ''} · datos en vivo del cotizador</span>
-        ${safeUrl(q.pdf_url) ? `<a href="${esc(safeUrl(q.pdf_url))}" target="_blank" rel="noopener" class="cot-pdf">Ver PDF</a>` : ''}</div>
+        <span class="cot-mini small">Total <b>${money(q.total, mon)}</b>${c.forma_pago ? ` · ${esc(c.forma_pago)}` : ''}</span>
+        <span class="cot-acc">${safeUrl(q.pdf_url) ? `<a href="${esc(safeUrl(q.pdf_url))}" target="_blank" rel="noopener" class="cot-pdf">Ver PDF</a>` : '<span class="small" title="Cotización importada: no tiene archivo en el cotizador">Sin PDF</span>'}
+        <button type="button" class="link sm cot-tog2">${abierto ? 'Ocultar ▴' : 'Ver detalle ▾'}</button></span></div>
+      <div class="cot-body">
       <div class="cot-grid">
         ${fila('Cliente', esc(q.cliente || '—') + (q.cliente_ruc ? ` <span class="small">RUC ${esc(q.cliente_ruc)}</span>` : ''))}
         ${fila('Subtotal', money(q.subtotal, mon))}
@@ -615,11 +620,32 @@ async function panelCotizacion(s){
         ${fila('Referencia', esc(q.referencia || ''))}
       </div>
       ${actividadesCot(q.actividades)}
+      </div>
       ${difMonto ? `<div class="small warn-txt">El monto registrado en esta OT (${money(s.monto_servicio, s.moneda)}) es distinto al subtotal cotizado (${money(q.subtotal, mon)}).</div>` : ''}`;
+    const tog = () => {
+      const ab = box.classList.toggle('cerrado') === false;
+      try { localStorage.setItem('maestro-cot-abierto', ab ? '1' : '0'); } catch {}
+      box.querySelector('.cot-tog').setAttribute('aria-expanded', ab);
+      box.querySelector('.cot-tog2').textContent = ab ? 'Ocultar ▴' : 'Ver detalle ▾';
+    };
+    box.querySelector('.cot-tog').onclick = tog; box.querySelector('.cot-tog2').onclick = tog;
   } catch (e) {
     if (box.isConnected) box.innerHTML = `<div class="small">No se pudo leer el cotizador en este momento (${esc(e.message)}).</div>`;
   }
 }
+
+// texto largo que se pliega (descripción, alcance, observaciones)
+const plegable = (txt) => {
+  const t = String(txt || '').trim();
+  if (!t) return '—';
+  if (t.length <= 180 && t.split('\n').length <= 4) return `<div style="white-space:pre-line">${esc(t)}</div>`;
+  return `<div class="plg"><div class="plg-t">${esc(t)}</div><button type="button" class="link sm plg-b">Ver más ▾</button></div>`;
+};
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.plg-b'); if (!b) return;
+  const p = b.closest('.plg'); const ab = p.classList.toggle('abierto');
+  b.textContent = ab ? 'Ver menos ▴' : 'Ver más ▾';
+});
 
 // ---------- detalle ----------
 let tabActual = 'componentes';
@@ -689,8 +715,8 @@ async function renderDetalle(id){
         ? `${fdate(gIng.fecha)} <div class="small">Guía ${esc(gIng.numero_guia)}${ge.length > 1 ? ` (+${ge.length - 1} guía${ge.length > 2 ? 's' : ''} más)` : ''} · ${gSal ? `salió el ${fdate(gSal.fecha)} (guía ${esc(gSal.numero_guia)}) · ${diasTaller} día${diasTaller === 1 ? '' : 's'} en taller` : `${diasTaller} día${diasTaller === 1 ? '' : 's'} en taller`}</div>`
         : '<span class="small">Sin guía de entrada registrada</span>')}
       ${info('Inicio / entrega', `${fdate(s.fecha_inicio)} → ${fdate(s.fecha_entrega)}`)}
-      ${info('Descripción', esc(s.descripcion||'—'))}
-      ${s.observaciones ? info('Observaciones', esc(s.observaciones)) : ''}
+      ${info('Descripción', plegable(s.descripcion))}
+      ${s.observaciones ? info('Observaciones', plegable(s.observaciones)) : ''}
     </div>`}
     <div class="panel">
       <div class="tabs">${tabs.map(([k,l,n])=>`<button data-t="${k}" class="${tabActual===k?'on':''}">${l}<span class="cnt">${n}</span></button>`).join('')}</div>
@@ -1011,8 +1037,8 @@ function cabeceraPI(s, O, S, info){
     <div class="grid-info">
       ${info('Responsable', esc(s.responsable||'—'))}
       ${info('Inicio / término estimado', `${fdate(s.fecha_inicio)} → ${fdate(s.fecha_entrega)}`)}
-      ${info('Objetivo / alcance', esc(s.descripcion||'—'))}
-      ${s.observaciones ? info('Observaciones', esc(s.observaciones)) : ''}
+      ${info('Objetivo / alcance', plegable(s.descripcion))}
+      ${s.observaciones ? info('Observaciones', plegable(s.observaciones)) : ''}
     </div>`;
 }
 
@@ -1110,7 +1136,7 @@ async function renderLabDetalle(id){
       ${info('Informe técnico', (INF.length ? INF.map(i => `<div style="margin-bottom:2px"><a href="#" data-tab-ir="informes" class="mono">${esc(i.numero)}</a> · ${esc(i.titulo)} ${enlacesInforme(i, urls)}</div>`).join('') : '—') + `<div class="small" style="margin-top:2px"><button type="button" class="link sm" id="inf-add-top">+ Registrar informe</button></div>`)}
       ${info('Responsable', esc(s.responsable || '—'))}
       ${info('Inicio / entrega', `${fdate(s.fecha_inicio)} → ${fdate(s.fecha_entrega)}`)}
-      ${info('Alcance / descripción', `<div style="white-space:pre-line">${esc(s.descripcion || '—')}</div>`)}
+      ${info('Alcance / descripción', plegable(s.descripcion))}
     </div>
     <div class="panel">
       <div class="tabs">${tabs.map(([k,l,n]) => `<button data-t="${k}" class="${tabLab === k ? 'on' : ''}">${l}<span class="cnt">${n}</span></button>`).join('')}</div>

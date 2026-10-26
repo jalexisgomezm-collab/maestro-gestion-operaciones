@@ -161,3 +161,17 @@ label.f span{display:block;margin-bottom:4px}
 .th-del{position:absolute;top:-6px;right:-6px;width:18px;height:18px;padding:0;border-radius:50%;border:1px solid #fff;background:#b42318;color:#fff;font-size:10px;line-height:16px;text-align:center;cursor:pointer;opacity:0;transition:opacity .15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
 .thumbs .th:hover .th-del,.th-del:focus{opacity:1}
 @media (hover:none){.th-del{opacity:1}}
+
+/* cotización plegable */
+.cot-tog{border:none;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.cot-ar{display:inline-block;transition:transform .15s;color:var(--acc-2)}
+.cot-panel:not(.cerrado) .cot-ar{transform:rotate(90deg)}
+.cot-acc{margin-left:auto;display:inline-flex;gap:10px;align-items:center}
+.cot-head .cot-acc .cot-pdf{margin-left:0}
+.cot-panel.cerrado .cot-body{display:none}
+.cot-panel.cerrado .cot-head{margin-bottom:0}
+.cot-panel:not(.cerrado) .cot-mini{display:none}
+/* textos largos plegables */
+.plg-t{white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.plg.abierto .plg-t{display:block;-webkit-line-clamp:unset}
+.plg-b{margin-top:2px;padding-left:0}
