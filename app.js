@@ -701,7 +701,7 @@ async function renderDetalle(id){
     ${esPI ? cabeceraPI(s, O, S, info) : `<div class="detail-head">
       <div><div class="ot-tag mono">${esc(s.numero_orden_trabajo||'')}</div><h1>${esc(s.nombre)}</h1><div class="sub">${esc(s.cliente||'Sin cliente')} · ${esc((s.tipo||'').toLowerCase())} ${s.estado!=='activo'?' · '+esc(s.estado):''}</div>
         <div class="row" style="margin-top:6px">${badge(s.estado_comercial, EST_COM[s.estado_comercial])} ${badge('op', EST_OP[s.estado_operativo])}</div></div>
-      <div class="row"><button id="rotulo" title="Rótulo de despacho para el empaque (uno por bulto)">🏷 Rótulo</button><button id="ficha" title="Ficha de la OT para imprimir o guardar como PDF">🖨 Ficha PDF</button><button id="edit">Editar datos</button><button class="danger" id="del">Eliminar</button></div>
+      <div class="row"><button id="rotulo" title="Rótulo de despacho para el empaque (uno por bulto)">🏷 Rótulo</button><button id="ficha" title="Ficha de la OT para imprimir o guardar como PDF">🖨 Ficha PDF</button><button id="dividir" title="Pasar uno o más componentes a una OT nueva (por ejemplo, cuando el cliente emite OC por separado)">✂ Dividir OT</button><button id="edit">Editar datos</button><button class="danger" id="del">Eliminar</button></div>
     </div>
     <div class="chain">${steps.map((st,i)=>`${i?'<span class="arr">→</span>':''}<div class="step ${st[2]==='dev'?'dev':st[2]?'done':''}"><b>${st[0]}</b>${esc(st[1]||'—')}</div>`).join('')}</div>
     <div class="grid-info">
@@ -724,6 +724,7 @@ async function renderDetalle(id){
       <div id="tab"></div>
     </div>`;
   document.getElementById('edit').onclick = () => editarServicio(s);
+  const btnDiv = document.getElementById('dividir'); if (btnDiv) btnDiv.onclick = () => dividirOT({ s, C, G, A });
   const btnRot = document.getElementById('rotulo'); if (btnRot) btnRot.onclick = async () => { btnRot.disabled = true; try { await abrirRotulo({ s, C, G, F }); } finally { btnRot.disabled = false; } };
   document.getElementById('ficha').onclick = async (e) => {
     const b = e.currentTarget; b.disabled = true;
@@ -1855,6 +1856,87 @@ async function registrarDetraccion(f, proyectoId, reload){
     if (error) errs.push(error.message);
     if (errs.length) { btn.disabled = false; form.querySelector('.prog').textContent = ''; return showErr(errs.join(' · ')); }
     cerrar(); toast('Detracción registrada'); reload();
+  };
+}
+
+// ---------- dividir OT: pasa componentes a una OT nueva (OC por separado del cliente) ----------
+async function dividirOT({ s, C, G, A }){
+  if (C.length < 2) { toast('Para dividir, la OT debe tener al menos 2 componentes'); return; }
+  const GE = G.filter(g => g.tipo === 'ENTRADA');
+  const REFS = A.filter(esReferencia);
+  const lab = (t, html, full = false) => `<label class="f ${full ? 'full' : ''}"><span>${t}</span>${html}</label>`;
+  $modal.innerHTML = `<div class="ov"><form class="modal" novalidate style="max-width:820px">
+    <header><h2>Dividir ${esc(s.numero_orden_trabajo || 'OT')}</h2><button type="button" class="link" data-x>✕</button></header>
+    <div class="body">
+      <p class="small" style="margin-top:0">Los componentes marcados pasan a una <b>OT nueva</b> del mismo cliente, con sus fotos y datos técnicos. Úsalo cuando el cliente emite una OC por separado: así cada OT lleva su propia cotización, OC, informe, guía de salida y factura.</p>
+      <div class="fsec">Componentes que pasan a la OT nueva</div>
+      <div class="tbl-wrap"><table><thead><tr><th></th><th>Componente</th><th>N° parte</th><th>N° serie</th><th>Fotos</th></tr></thead><tbody>
+        ${C.map(c => `<tr><td><input type="checkbox" data-mv="${c.id}" style="width:auto"></td><td>${esc(c.descripcion)}<div class="small">${esc([c.marca, c.modelo].filter(Boolean).join(' / '))}</div></td><td class="mono small">${esc(c.numero_parte || '—')}</td><td class="mono small">${esc(c.numero_serie || '—')}</td><td class="small">${A.filter(a => a.componente_id === c.id).length}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="fgrid" style="margin-top:10px">
+        <div class="fsec">Datos de la OT nueva</div>
+        ${lab('Nombre del servicio', `<input name="nombre" value="${esc(s.nombre || '')}">`, true)}
+        ${lab('Estado comercial', `<select name="estado_comercial">${Object.entries(EST_COM).filter(([k]) => k !== 'CON_OC').map(([k, l]) => `<option value="${k}" ${k === (s.estado_comercial === 'CON_OC' ? 'EN_EVALUACION' : s.estado_comercial) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`)}
+        ${lab('Responsable', `<input name="responsable" value="${esc(s.responsable || '')}">`)}
+        ${lab('Descripción / falla reportada', `<textarea name="descripcion" rows="3" placeholder="Falla observada de los componentes que se separan"></textarea>`, true)}
+        <div class="fsec">Qué se copia a la OT nueva</div>
+        <div class="full" style="grid-column:1/-1">
+          ${GE.map(g => `<label style="display:flex;gap:8px;align-items:center;margin:3px 0"><input type="checkbox" data-gc="${g.id}" checked style="width:auto"> Guía de ingreso <b class="mono">${esc(g.numero_guia)}</b> · ${fdate(g.fecha)} <span class="small">(queda en ambas OT)</span></label>`).join('') || '<div class="small">Esta OT no tiene guía de ingreso registrada.</div>'}
+          ${REFS.length ? `<label style="display:flex;gap:8px;align-items:center;margin:3px 0"><input type="checkbox" name="refs" checked style="width:auto"> Documentos de referencia del cliente (${REFS.length})</label>` : ''}
+        </div>
+      </div>
+      <div class="small prog" style="margin-top:8px"></div><div class="err" hidden></div>
+    </div>
+    <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">Crear OT nueva y mover</button></footer></form></div>`;
+  const form = $modal.querySelector('form');
+  const showErr = (m) => { const x = form.querySelector('.err'); x.hidden = false; x.textContent = m; };
+  $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = () => { $modal.innerHTML = ''; });
+  const sel = () => C.filter(c => form.querySelector(`[data-mv="${c.id}"]`).checked);
+  form.querySelectorAll('[data-mv]').forEach(cb => cb.onchange = () => {
+    const ds = form.elements.descripcion;
+    if (!ds.dataset.manual) ds.value = sel().map(c => [c.descripcion, c.datos_tecnicos, c.observacion].filter(Boolean).join(' · ')).join('\n');
+  });
+  form.elements.descripcion.oninput = (e) => { e.target.dataset.manual = '1'; };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const mover = sel();
+    if (!mover.length) return showErr('Marca al menos un componente para pasar a la OT nueva.');
+    if (mover.length === C.length) return showErr('Deja al menos un componente en la OT original.');
+    const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+    const prog = (t) => { form.querySelector('.prog').textContent = t; };
+    const v = (n) => form.elements[n].value.trim();
+    try {
+      prog('Creando la OT nueva…');
+      const nueva = chk(await sb.from('proyectos').insert({
+        clase: 'SERVICIO', nombre: v('nombre') || s.nombre, cliente: s.cliente, tipo: s.tipo, responsable: val(v('responsable')),
+        moneda: s.moneda, estado_comercial: v('estado_comercial') || 'EN_EVALUACION', estado_operativo: s.estado_operativo || 'POR_INICIAR',
+        fecha_inicio: s.fecha_inicio, descripcion: val(v('descripcion')),
+        observaciones: `Separada de ${s.numero_orden_trabajo} (OC por separado del cliente).`, creado_por: session.user.id,
+      }).select('id,numero_orden_trabajo').single());
+      const ids = mover.map(c => c.id);
+      prog('Moviendo componentes y fotos…');
+      chk(await sb.from('proyecto_componentes').update({ proyecto_id: nueva.id }).in('id', ids));
+      chk(await sb.from('proyecto_archivos').update({ proyecto_id: nueva.id }).in('componente_id', ids));
+      // copia de guías de ingreso (y su PDF) y de documentos de referencia
+      const copiarArchivo = async (a, extra) => {
+        const destino = `${nueva.id}/${a.categoria === 'GUIA' ? 'guia' : 'referencia'}/${Date.now()}_${limpiarNombre(a.nombre)}`;
+        const cp = await sb.storage.from(BUCKET).copy(a.storage_path, destino);
+        if (cp.error) throw new Error(`No se pudo copiar ${a.nombre}: ${cp.error.message}`);
+        chk(await sb.from('proyecto_archivos').insert({ proyecto_id: nueva.id, categoria: a.categoria, storage_path: destino, nombre: a.nombre, mime: a.mime, tamano: a.tamano, descripcion: a.descripcion, subido_por: session.user.id, ...extra }));
+      };
+      for (const g of GE.filter(g => form.querySelector(`[data-gc="${g.id}"]`)?.checked)) {
+        prog(`Copiando guía ${g.numero_guia}…`);
+        const ng = chk(await sb.from('proyecto_guias').insert({ proyecto_id: nueva.id, tipo: g.tipo, numero_guia: g.numero_guia, fecha: g.fecha, detalle: mover.map(c => c.descripcion).join(', '), observacion: `También registrada en ${s.numero_orden_trabajo}` }).select('id').single());
+        for (const a of A.filter(a => a.guia_id === g.id)) await copiarArchivo(a, { guia_id: ng.id });
+      }
+      if (form.elements.refs?.checked) for (const a of REFS) { prog('Copiando documentos de referencia…'); await copiarArchivo(a, {}); }
+      prog('Anotando en la OT original…');
+      const nota = `Se separó a ${nueva.numero_orden_trabajo}: ${mover.map(c => c.descripcion + (c.numero_serie ? ' (S/N ' + c.numero_serie + ')' : '')).join(', ')}.`;
+      chk(await sb.from('proyectos').update({ observaciones: [s.observaciones, nota].filter(Boolean).join('\n'), updated_at: new Date().toISOString() }).eq('id', s.id));
+      $modal.innerHTML = '';
+      toast(`Se creó ${nueva.numero_orden_trabajo} con ${mover.length} componente(s)`);
+      location.hash = `#/servicio/${nueva.id}`;
+    } catch (err) { btn.disabled = false; prog(''); showErr(err.message || String(err)); }
   };
 }
 
