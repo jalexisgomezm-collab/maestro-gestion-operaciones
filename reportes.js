@@ -54,6 +54,8 @@ const CSS = `
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.3mm 6mm; }
   .grid.tres { grid-template-columns: 1fr 1fr 1fr; }
   .dato { display: flex; gap: 2mm; } .dato b { color: #016B39; min-width: 30mm; flex: none; } .dato.full { grid-column: 1 / -1; }
+  .dato.full > span { flex: 1; min-width: 0; }
+  .cond { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8mm 6mm; } .cond i { font-style: normal; color: #555; } .cond .w { grid-column: 1 / -1; }
   .pre { white-space: pre-line; }
   table.t { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
   table.t th { background: #02934E; color: #fff; text-align: left; padding: 1.3mm 1.8mm; font-weight: bold; }
@@ -101,6 +103,10 @@ function abrir(html) {
 }
 
 const caja = (t, contenido) => `<div class="caja"><h3>${esc(t)}</h3><div class="cuerpo">${contenido}</div></div>`;
+const condicionesHTML = (c) => {
+  const f = [['Forma de pago', c.forma_pago], ['Garantía', c.garantia], ['Validez', c.validez], ['Plazo de entrega', c.plazo_entrega]].filter(([, v]) => v);
+  return f.length ? `<div class="cond">${f.map(([k, v]) => `<div${String(v).length > 70 ? ' class="w"' : ''}><i>${esc(k)}:</i> ${esc(v)}</div>`).join('')}</div>` : '—';
+};
 const dato = (l, v, full = false, pre = false) => `<div class="dato${full ? ' full' : ''}"><b>${esc(l)}</b><span class="${pre ? 'pre' : ''}">${v == null || v === '' ? '—' : v}</span></div>`;
 const tabla = (cab, filas, vacio) => filas.length
   ? `<table class="t"><thead><tr>${cab.map(([t, cl]) => `<th class="${cl || ''}">${esc(t)}</th>`).join('')}</tr></thead><tbody>${filas.join('')}</tbody></table>`
@@ -157,7 +163,7 @@ export async function fichaOT(d) {
       ${dato('OC del cliente', s.numero_oc_cliente ? `${esc(s.numero_oc_cliente)} · ${fdate(s.fecha_oc_cliente)}` : '—')}
       ${dato('Monto (sin IGV)', money(s.monto_servicio, mon))}
       ${dato('Informe técnico', informesTexto(s, INF), true)}
-      ${dato('Condiciones', cot?.condiciones ? esc([cot.condiciones.forma_pago, cot.condiciones.plazo_entrega && `Plazo: ${cot.condiciones.plazo_entrega}`, cot.condiciones.garantia && `Garantía: ${cot.condiciones.garantia}`].filter(Boolean).join(' · ')) : '—')}</div>`);
+      ${dato('Condiciones', cot?.condiciones ? condicionesHTML(cot.condiciones) : '—', true)}</div>`);
 
   const fechas = esPI ? '' : caja('Fechas del servicio', `<div class="grid">
       ${dato('Ingreso (guía)', ing ? `${fdate(ing.fecha)} · Guía ${esc(ing.numero_guia)}` : 'Sin guía de entrada')}
