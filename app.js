@@ -101,6 +101,7 @@ function shell(inner){
     <div class="sp"></div>
     ${LAB() ? `<span class="badge b-pi" style="margin-right:4px">${VE_GUIAS ? 'Vista técnica' : 'Laboratorio'}</span>`+'<a href="#/" style="color:#fff;font-size:13px;font-weight:500">Servicios</a>' : ''}
     <a href="#/informes" style="color:#fff;font-size:13px;font-weight:500">Informes técnicos</a>
+    ${!LAB() || VE_GUIAS ? '<a href="#/guias" style="color:#fff;font-size:13px;font-weight:500">Guías de remisión</a>' : ''}
     ${LAB() ? '' : '<a href="#/factoring" style="color:#fff;font-size:13px;font-weight:500">Factoring</a>'}
     <a href="${OC_APP}" target="_blank" rel="noopener" style="color:#cbd5e1;font-size:13px">Sistema OC ↗</a>
     <span class="user">${esc(session?.user?.email)}</span>
@@ -1774,6 +1775,75 @@ function imprimirCarta(c, config, w = null){
   win.document.open(); win.document.write(htmlCarta(c, config)); win.document.close();
 }
 
+// ---------- guías de remisión (todas las OT) ----------
+let filtroGuia = { q: '', tipo: 'TODAS', mes: '' };
+async function renderGuias(){
+  $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
+  let G, A, P;
+  try {
+    const [g, a, p] = await Promise.all([
+      sb.from('proyecto_guias').select('*').order('fecha', { ascending: false }),
+      sb.from('proyecto_archivos').select('id,proyecto_id,guia_id,storage_path,nombre,mime,created_at').not('guia_id', 'is', null),
+      LAB() ? sb.rpc('lab_servicios').select('id,numero_orden_trabajo,cliente,nombre') : sb.from('proyectos_maestro').select('id,numero_orden_trabajo,cliente,nombre,clase'),
+    ]);
+    if (g.error) throw new Error(g.error.message);
+    G = g.data || []; A = a.data || []; P = p.data || [];
+  } catch (e) { $app.querySelector('main').innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const urls = await firmarUrls(A);
+  const pById = Object.fromEntries(P.map(x => [x.id, x]));
+  // una fila por guía (la misma guía puede estar registrada en varias OT)
+  const norm = (n) => String(n || '').toUpperCase().replace(/\s+/g, ' ').trim();
+  const grupos = new Map();
+  for (const g of G) {
+    const k = g.tipo + '|' + norm(g.numero_guia).replace(/\s+(GTO|SHP)$/,'');
+    if (!grupos.has(k)) grupos.set(k, { ...g, ots: [], ids: [] });
+    const r = grupos.get(k);
+    r.ids.push(g.id); if (g.proyecto_id && !r.ots.some(o => o.id === g.proyecto_id)) r.ots.push(pById[g.proyecto_id] || { id: g.proyecto_id });
+    if (!r.detalle && g.detalle) r.detalle = g.detalle;
+  }
+  const lista = [...grupos.values()].map(r => ({ ...r, archivos: A.filter(a => r.ids.includes(a.guia_id)).filter((a, i, l) => l.findIndex(x => x.nombre === a.nombre) === i) }));
+  const q = filtroGuia.q.toLowerCase();
+  const rows = lista.filter(r => (filtroGuia.tipo === 'TODAS' || r.tipo === filtroGuia.tipo) && (!filtroGuia.mes || String(r.fecha || '').startsWith(filtroGuia.mes)) &&
+    (!q || [r.numero_guia, r.detalle, r.observacion, ...r.ots.flatMap(o => [o.numero_orden_trabajo, o.cliente, o.nombre])].some(x => String(x || '').toLowerCase().includes(q))));
+  const sal = lista.filter(r => r.tipo === 'SALIDA'), ent = lista.filter(r => r.tipo === 'ENTRADA');
+  const ultGTO = [...sal].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))[0];
+  const sinArch = lista.filter(r => !r.archivos.length).length;
+  const meses = [...new Set(lista.map(r => String(r.fecha || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+  const MESN = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Set','Oct','Nov','Dic'];
+  const kpi = (n, l, k) => `<div class="kpi ${k && filtroGuia.tipo === k ? 'sel' : ''}" ${k ? `data-kt="${k}"` : 'style="cursor:default"'}><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  $app.querySelector('main').innerHTML = `
+    <div class="row" style="justify-content:space-between">
+      <div><h1>Guías de remisión</h1><div class="sub">Todas las guías registradas en las OT: las que emite GTO (salida) y las del cliente (entrada), con su PDF.</div></div>
+    </div>
+    <div class="kpis">${kpi(lista.length, 'Guías registradas', 'TODAS')}${kpi(sal.length, 'Guías GTO (salida)', 'SALIDA')}${kpi(ent.length, 'Guías del cliente (entrada)', 'ENTRADA')}${kpi(sinArch, 'Sin PDF adjunto')}${kpi(ultGTO ? `<span style="font-size:17px">${esc(ultGTO.numero_guia)}</span>` : '—', 'Última guía GTO' + (ultGTO ? ' · ' + fdate(ultGTO.fecha) : ''))}</div>
+    <div class="panel">
+      <div class="toolbar">
+        <input type="search" id="gu-q" placeholder="Buscar N° de guía, OT, cliente o detalle…" value="${esc(filtroGuia.q)}">
+        <select id="gu-tipo"><option value="TODAS">Todas</option><option value="SALIDA" ${filtroGuia.tipo === 'SALIDA' ? 'selected' : ''}>Salida (emite GTO)</option><option value="ENTRADA" ${filtroGuia.tipo === 'ENTRADA' ? 'selected' : ''}>Entrada (del cliente)</option></select>
+        <select id="gu-mes"><option value="">Todos los meses</option>${meses.map(m => `<option value="${m}" ${filtroGuia.mes === m ? 'selected' : ''}>${MESN[+m.slice(5) - 1]} ${m.slice(0, 4)}</option>`).join('')}</select>
+        <div style="flex:1"></div><span class="small">${rows.length} guía(s)</span>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>N° guía</th><th>Tipo</th><th>Fecha</th><th>OT / cliente</th><th>Detalle</th><th>Archivo</th></tr></thead><tbody>
+      ${rows.map(r => `<tr>
+        <td class="mono" style="font-weight:500;white-space:nowrap">${esc(r.numero_guia)}</td>
+        <td>${badge(r.tipo, r.tipo === 'SALIDA' ? 'Salida · GTO' : 'Entrada · cliente')}</td>
+        <td style="white-space:nowrap">${fdate(r.fecha)}</td>
+        <td>${r.ots.map(o => `<div><a class="mono" href="#/servicio/${o.id}">${esc(o.numero_orden_trabajo || 'OT')}</a>${o.cliente ? `<div class="small">${esc(o.cliente)}</div>` : ''}</div>`).join('') || '<span class="small">—</span>'}</td>
+        <td>${plegable(r.detalle)}${r.observacion ? `<div class="small">${esc(r.observacion)}</div>` : ''}</td>
+        <td style="white-space:nowrap">${r.archivos.map(a => urls[a.storage_path] ? `<a class="link-sm" href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}"><span class="doc-tag p">${tipoDoc(a)}</span></a>` : '').join(' ')}
+          ${!LAB() && r.ots[0]?.id ? `<button class="link sm" data-gup="${r.ids[0]}" data-pid="${r.ots[0].id}">${r.archivos.length ? '+ otro' : '📎 Adjuntar PDF'}</button>` : (r.archivos.length ? '' : '<span class="small">Sin archivo</span>')}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="empty">No hay guías con este filtro.</td></tr>'}
+      </tbody></table></div>
+    </div>
+    <p class="small" style="margin-top:8px">Las guías se registran dentro de cada OT (pestaña <b>Guías de remisión</b>); aquí se ven todas juntas.</p>`;
+  const again = () => renderGuias();
+  document.getElementById('gu-q').oninput = (e) => { filtroGuia.q = e.target.value; clearTimeout(window._gq); window._gq = setTimeout(() => renderGuias().then(() => { const i = document.getElementById('gu-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
+  document.getElementById('gu-tipo').onchange = (e) => { filtroGuia.tipo = e.target.value; again(); };
+  document.getElementById('gu-mes').onchange = (e) => { filtroGuia.mes = e.target.value; again(); };
+  $app.querySelectorAll('[data-kt]').forEach(k => k.onclick = () => { filtroGuia.tipo = k.dataset.kt; again(); });
+  $app.querySelectorAll('[data-gup]').forEach(b => b.onclick = () => subirArchivos({ proyectoId: b.dataset.pid, categoria: 'GUIA', guiaId: b.dataset.gup, accept: 'application/pdf,image/*' }).then(ok => ok && again()));
+}
+
 // ---------- router ----------
 async function route(){
   $modal.innerHTML = ''; document.onkeydown = null;  // cerrar ventanas abiertas al cambiar de página
@@ -1795,11 +1865,13 @@ async function route(){
   if (LAB()) {
     if (m) return renderLabDetalle(m[1]);
     if (location.hash.startsWith('#/informes')) return renderInformes();
+    if (VE_GUIAS && location.hash.startsWith('#/guias')) return renderGuias();
     return renderLabLista();
   }
   if (m) return renderDetalle(m[1]);
   if (location.hash.startsWith('#/informes')) return renderInformes();
   if (location.hash.startsWith('#/factoring')) return renderFactoring();
+  if (location.hash.startsWith('#/guias')) return renderGuias();
   return renderLista();
 }
 window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/servicio/')) { tabActual = 'componentes'; tabLab = 'componentes'; } route(); });
