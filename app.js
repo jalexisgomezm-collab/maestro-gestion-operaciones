@@ -451,8 +451,6 @@ const SERV_FIELDS = [
   { sec:'Documentos vinculados' },
   { k:'numero_cotizacion', l:'N° Cotización', list:true, ph:'Elige de la lista del cotizador' },
   { k:'enlace_cotizacion', l:'Enlace a la cotización (opcional)', ph:'https://…' },
-  { k:'numero_informe', l:'N° Informe técnico' },
-  { k:'enlace_informe', l:'Enlace al informe (opcional)', ph:'https://…' },
   { k:'estado', l:'Estado del registro', t:'select', opts:[['activo','Activo'],['finalizado','Finalizado'],['cancelado','Cancelado']], def:'activo' },
   { k:'observaciones', l:'Observaciones', t:'area', full:true },
 ];
