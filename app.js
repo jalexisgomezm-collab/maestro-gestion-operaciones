@@ -34,7 +34,9 @@ let filtro = { clase: 'SERVICIO', estado: 'TODOS', q: '', verCerrados: false };
 
 // ---------- modal genérico de formulario ----------
 function field(f, data){
-  const v = data?.[f.k] ?? f.def ?? '';
+  let v = data?.[f.k] ?? f.def ?? '';
+  if (f.nullAs !== undefined && data && f.k in data && data[f.k] == null) v = f.nullAs;
+  if (f.t === 'select' && typeof v === 'number') v = String(Number(v));
   if (f.sec) return `<div class="fsec">${esc(f.sec)}</div>`;
   let inp;
   if (f.t === 'select') inp = `<select name="${f.k}">${f.opts.map(([o,l]) => `<option value="${esc(o)}" ${String(o)===String(v)?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
@@ -282,7 +284,7 @@ const FONDO = () => location.origin + '/membrete-gto.jpg';
 async function datosReporte(){
   const [pr, fa, co, gu, oc, so, inf] = await Promise.all([
     sb.from('proyectos_maestro').select('*').order('numero_orden_trabajo', { ascending:true }),
-    sb.from('proyecto_facturas').select('proyecto_id,numero_factura,fecha_emision,fecha_vencimiento,monto,monto_cobrado,estado_cobro,moneda,fecha_cobro'),
+    sb.from('proyecto_facturas').select('proyecto_id,numero_factura,fecha_emision,fecha_vencimiento,monto,detraccion_pct,detraccion_monto,detraccion_estado,detraccion_fecha,monto_cobrado,estado_cobro,moneda,fecha_cobro'),
     sb.from('proyecto_componentes').select('proyecto_id'),
     sb.from('proyecto_guias').select('proyecto_id,tipo,numero_guia,fecha'),
     sb.from('ordenes_compra').select('proyecto_id,numero,total,moneda,estado').not('proyecto_id','is',null),
@@ -299,7 +301,7 @@ async function renderLista(){
   const esPI = filtro.clase === 'INTERNO';
   const [pr, fa, co, gu, oc, so, inf] = await Promise.all([
     sb.from('proyectos_maestro').select('*').order('created_at', { ascending:false }),
-    sb.from('proyecto_facturas').select('proyecto_id,monto,monto_cobrado,estado_cobro,moneda'),
+    sb.from('proyecto_facturas').select('proyecto_id,monto,detraccion_monto,monto_cobrado,estado_cobro,moneda'),
     sb.from('proyecto_componentes').select('proyecto_id'),
     sb.from('proyecto_guias').select('proyecto_id,tipo'),
     sb.from('ordenes_compra').select('proyecto_id,total,moneda,estado').not('proyecto_id','is',null),
@@ -327,7 +329,7 @@ async function renderLista(){
 
   if (!esPI) {
     let porCobrarS=0, porCobrarD=0;
-    (fa.data||[]).forEach(f => { if (f.estado_cobro==='PENDIENTE'||f.estado_cobro==='PARCIAL'){ const s=Number(f.monto||0)-Number(f.monto_cobrado||0); f.moneda==='DOLARES'?porCobrarD+=s:porCobrarS+=s; } });
+    (fa.data||[]).forEach(f => { if (f.estado_cobro==='PENDIENTE'||f.estado_cobro==='PARCIAL'){ const s=Number(f.monto||0)-Number(f.detraccion_monto||0)-Number(f.monto_cobrado||0); f.moneda==='DOLARES'?porCobrarD+=s:porCobrarS+=s; } });
     const cobro = (id) => {
       const fs = (F[id]||[]).filter(f => f.estado_cobro !== 'ANULADA');
       if (!fs.length) return badge('NOFACT','Sin factura');
@@ -748,10 +750,10 @@ async function renderDetalle(id){
   const reload = () => renderDetalle(id);
   const gi = $app.querySelector('.grid-info'); if (gi && !esPI) bindArchivos(gi, [...OCC, ...REF], urls, id, reload, s);
   const actions = (i) => `<td style="white-space:nowrap;text-align:right"><button class="link sm" data-e="${i}">Editar</button><button class="link sm danger" data-d="${i}">Quitar</button></td>`;
-  const wire = (list, table, fields, title, fixed = {}, adjuntos = null) => {
-    T.querySelectorAll('[data-e]').forEach(b => b.onclick = async () => { const r=list[b.dataset.e]; if (await formModal({ title:'Editar '+title, fields, data:r, onSave: async d => chk(await sb.from(table).update(d).eq('id', r.id)) })) reload(); });
+  const wire = (list, table, fields, title, fixed = {}, adjuntos = null, prep = (d) => d) => {
+    T.querySelectorAll('[data-e]').forEach(b => b.onclick = async () => { const r=list[b.dataset.e]; if (await formModal({ title:'Editar '+title, fields, data:r, onSave: async d => chk(await sb.from(table).update(prep(d, r)).eq('id', r.id)) })) reload(); });
     T.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => { const r=list[b.dataset.d]; const adj = adjuntos ? adjuntos(r) : []; if (!await confirmModal(adj.length ? `¿Quitar este registro y sus ${adj.length} archivo(s)?` : '¿Quitar este registro?')) return; if (adj.length) { await sb.storage.from(BUCKET).remove(adj.map(a=>a.storage_path)); await sb.from('proyecto_archivos').delete().in('id', adj.map(a=>a.id)); } const {error}=await sb.from(table).delete().eq('id', r.id); error?toast(error.message):reload(); });
-    const a = T.querySelector('[data-add]'); if (a) a.onclick = async () => { if (await formModal({ title:'Agregar '+title, fields, data: fixed, onSave: async d => chk(await sb.from(table).insert({ ...fixed, ...d, proyecto_id: id })) })) reload(); };
+    const a = T.querySelector('[data-add]'); if (a) a.onclick = async () => { if (await formModal({ title:'Agregar '+title, fields, data: fixed, onSave: async d => chk(await sb.from(table).insert({ ...fixed, ...prep(d, null), proyecto_id: id })) })) reload(); };
   };
 
   if (tabActual === 'componentes') {
@@ -794,21 +796,57 @@ async function renderDetalle(id){
       { k:'moneda', l:'Moneda', t:'select', opts:[['SOLES','Soles'],['DOLARES','Dólares']], def: s.moneda || 'SOLES' },
       { k:'monto', l:'Monto total (con IGV)', t:'number', req:true },
       { k:'fecha_vencimiento', l:'Fecha de vencimiento', t:'date' },
+      { sec:'Detracción (SPOT)' },
+      { k:'detraccion_pct', l:'% de detracción', t:'select', opts:[['12','12 % · servicios'],['10','10 %'],['4','4 %'],['NA','No aplica']], def:'12', nullAs:'NA' },
+      { k:'detraccion_monto', l:'Monto de detracción (vacío = automático, redondeado)', t:'number', ph:'Automático' },
+      { sec:'Cobranza (lo que paga el cliente, sin la detracción)' },
       { k:'estado_cobro', l:'Estado de cobro', t:'select', opts:Object.entries(EST_COBRO), def:'PENDIENTE' },
-      { k:'monto_cobrado', l:'Monto cobrado', t:'number', def:0 },
+      { k:'monto_cobrado', l:'Monto cobrado (neto)', t:'number', def:0 },
       { k:'fecha_cobro', l:'Fecha de cobro', t:'date' },
       { k:'observacion', l:'Observación', full:true },
     ];
+    // detracción: si no se escribe el monto, 12 % (u otro %) del total redondeado a entero, como lo calcula SUNAT
+    const prepFactura = (d, r) => {
+      const pct = d.detraccion_pct == null || d.detraccion_pct === '' || d.detraccion_pct === 'NA' ? null : Number(d.detraccion_pct);
+      d.detraccion_pct = pct;
+      if (pct == null) { d.detraccion_monto = null; d.detraccion_estado = null; }
+      else {
+        if (d.detraccion_monto == null || (r && d.detraccion_monto === r.detraccion_monto && (d.monto !== r.monto || pct !== Number(r.detraccion_pct)))) d.detraccion_monto = Math.round(Number(d.monto || 0) * pct / 100);
+        if (!r || !r.detraccion_estado) d.detraccion_estado = 'PENDIENTE';
+      }
+      const neto = Number(d.monto || 0) - Number(d.detraccion_monto || 0);
+      if (d.estado_cobro === 'COBRADO' && !Number(d.monto_cobrado)) d.monto_cobrado = neto;
+      return d;
+    };
     const hoy = new Date().toISOString().slice(0,10);
-    T.innerHTML = `<div class="sec-head"><div class="small">Facturas emitidas al cliente por este servicio y si ya se cobraron. Para ceder una factura al factoring usa <a href="#/factoring">Factoring</a>.</div><button class="pri sm" data-add>+ Registrar factura</button></div>
-      <div class="tbl-wrap"><table><thead><tr><th>N° factura</th><th>Emisión</th><th>Vence</th><th style="text-align:right">Monto</th><th style="text-align:right">Cobrado</th><th>Estado</th><th>Fecha cobro</th><th>PDF / XML</th><th></th></tr></thead><tbody>
+    const netoF = (f) => Number(f.monto || 0) - Number(f.detraccion_monto || 0);
+    const celdaDet = (f, i) => {
+      if (f.detraccion_pct == null) return '<span class="small">No aplica</span>';
+      const arch = A.filter(a => a.factura_id === f.id && a.categoria === 'DETRACCION');
+      const dep = f.detraccion_estado === 'DEPOSITADA';
+      return `${badge(dep ? 'COBRADO' : 'PENDIENTE', dep ? 'Depositada' : 'Por depositar')}
+        <div class="small">${money(f.detraccion_monto, f.moneda)} · ${Number(f.detraccion_pct)} %${f.detraccion_soles ? ` · S/ ${Number(f.detraccion_soles).toLocaleString('es-PE', { minimumFractionDigits: 2 })}` : ''}</div>
+        ${dep ? `<div class="small">${fdate(f.detraccion_fecha)}${f.detraccion_constancia ? ` · Const. ${esc(f.detraccion_constancia)}` : ''}</div>` : ''}
+        <div class="small" style="white-space:nowrap">${arch.map(a => urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}">${tipoDoc(a)}</a><button type="button" class="link sm danger" data-rm="${a.id}" title="Quitar">✕</button>` : '').join(' ')}
+        <button type="button" class="link sm" data-det="${i}">${dep ? 'Editar' : 'Registrar depósito'}</button></div>`;
+    };
+    T.innerHTML = `<div class="sec-head"><div class="small">Facturas emitidas al cliente. En servicios el cliente descuenta la <b>detracción</b> (la deposita en tu cuenta del Banco de la Nación), por eso el <b>neto a cobrar</b> es menor que el total. Para ceder una factura al factoring usa <a href="#/factoring">Factoring</a>.</div><button class="pri sm" data-add>+ Registrar factura</button></div>
+      <div class="tbl-wrap"><table><thead><tr><th>N° factura</th><th>Emisión / vence</th><th style="text-align:right">Total</th><th style="text-align:right">Neto a cobrar</th><th style="text-align:right">Cobrado</th><th>Estado</th><th>Detracción</th><th>PDF / XML</th><th></th></tr></thead><tbody>
       ${F.map((f,i)=>{ const venc = f.fecha_vencimiento && f.fecha_vencimiento < hoy && (f.estado_cobro==='PENDIENTE'||f.estado_cobro==='PARCIAL');
         const ces = (cesiones.data||[]).filter(x => x.factura_id === f.id);
-        return `<tr><td class="mono">${esc(f.numero_factura)}${ces.map(x => ` <a href="#/factoring" class="badge b-PARCIAL" title="Cedida a ${esc(x.entidad_nombre)}">Factoring · carta ${esc(codigoCorto(x))}</a>`).join('')}${f.observacion?`<div class="small">${esc(f.observacion)}</div>`:''}</td><td>${fdate(f.fecha_emision)}</td><td>${fdate(f.fecha_vencimiento)}${venc?' <span class="badge b-PENDIENTE">Vencida</span>':''}</td><td class="money">${money(f.monto,f.moneda)}</td><td class="money">${money(f.monto_cobrado,f.moneda)}</td><td>${badge(f.estado_cobro, EST_COBRO[f.estado_cobro])}${f.estado_cobro!=='COBRADO'&&f.estado_cobro!=='ANULADA'?` <button class="link sm" data-c="${i}">Marcar cobrada</button>`:''}</td><td>${fdate(f.fecha_cobro)}</td><td class="small" style="white-space:nowrap">${archFactura(A.filter(a=>a.factura_id===f.id), urls, f.id)}</td>${actions(i)}</tr>`; }).join('') || '<tr><td colspan="9" class="empty">Aún no se registra factura para este servicio.</td></tr>'}
+        return `<tr><td class="mono">${esc(f.numero_factura)}${ces.map(x => ` <a href="#/factoring" class="badge b-PARCIAL" title="Cedida a ${esc(x.entidad_nombre)}">Factoring · carta ${esc(codigoCorto(x))}</a>`).join('')}${f.observacion?`<div class="small">${esc(f.observacion)}</div>`:''}</td>
+          <td style="white-space:nowrap">${fdate(f.fecha_emision)}<div class="small">vence ${fdate(f.fecha_vencimiento)}${venc?' <span class="badge b-PENDIENTE">Vencida</span>':''}</div></td>
+          <td class="money">${money(f.monto,f.moneda)}${f.detraccion_monto ? `<div class="small">− detr. ${money(f.detraccion_monto, f.moneda)}</div>` : ''}</td>
+          <td class="money"><b>${money(netoF(f),f.moneda)}</b></td>
+          <td class="money">${money(f.monto_cobrado,f.moneda)}${f.fecha_cobro ? `<div class="small">${fdate(f.fecha_cobro)}</div>` : ''}</td>
+          <td>${badge(f.estado_cobro, EST_COBRO[f.estado_cobro])}${f.estado_cobro!=='COBRADO'&&f.estado_cobro!=='ANULADA'?`<div><button class="link sm" data-c="${i}">Marcar cobrada</button></div>`:''}</td>
+          <td style="min-width:150px">${celdaDet(f, i)}</td>
+          <td class="small" style="white-space:nowrap">${archFactura(A.filter(a=>a.factura_id===f.id && a.categoria!=='DETRACCION'), urls, f.id)}</td>${actions(i)}</tr>`; }).join('') || '<tr><td colspan="9" class="empty">Aún no se registra factura para este servicio.</td></tr>'}
       </tbody></table></div>`;
-    wire(F, 'proyecto_facturas', fields, 'factura', {}, (r) => A.filter(a => a.factura_id === r.id));
+    wire(F, 'proyecto_facturas', fields, 'factura', {}, (r) => A.filter(a => a.factura_id === r.id), prepFactura);
     bindArchivos(T, A, urls, id, reload);
-    T.querySelectorAll('[data-c]').forEach(b => b.onclick = async () => { const f=F[b.dataset.c]; const {error}=await sb.from('proyecto_facturas').update({ estado_cobro:'COBRADO', monto_cobrado:f.monto, fecha_cobro: hoy }).eq('id', f.id); error?toast(error.message):(toast('Factura marcada como cobrada'),reload()); });
+    T.querySelectorAll('[data-c]').forEach(b => b.onclick = async () => { const f=F[b.dataset.c]; const {error}=await sb.from('proyecto_facturas').update({ estado_cobro:'COBRADO', monto_cobrado:netoF(f), fecha_cobro: hoy }).eq('id', f.id); error?toast(error.message):(toast('Factura marcada como cobrada (neto)'),reload()); });
+    T.querySelectorAll('[data-det]').forEach(b => b.onclick = () => registrarDetraccion(F[b.dataset.det], id, reload));
   }
 
   if (tabActual === 'requerimientos') {
@@ -1771,6 +1809,53 @@ function imprimirCarta(c, config, w = null){
   const win = w || window.open('about:blank', '_blank');
   if (!win) { toast('El navegador bloqueó la ventana. Permite ventanas emergentes.'); return; }
   win.document.open(); win.document.write(htmlCarta(c, config)); win.document.close();
+}
+
+// detracción de una factura: depósito en el Banco de la Nación + constancia de SUNAT
+async function registrarDetraccion(f, proyectoId, reload){
+  const hoy = new Date().toISOString().slice(0, 10);
+  const { data: arch } = await sb.from('proyecto_archivos').select('*').eq('factura_id', f.id).eq('categoria', 'DETRACCION');
+  const lab = (t, html, full = false) => `<label class="f ${full ? 'full' : ''}"><span>${t}</span>${html}</label>`;
+  $modal.innerHTML = `<div class="ov"><form class="modal" novalidate style="max-width:640px">
+    <header><h2>Detracción · factura ${esc(f.numero_factura)}</h2><button type="button" class="link" data-x>✕</button></header>
+    <div class="body">
+      <p class="small" style="margin-top:0">Total ${money(f.monto, f.moneda)} · detracción ${Number(f.detraccion_pct)} % = <b>${money(f.detraccion_monto, f.moneda)}</b> · neto a cobrar <b>${money(Number(f.monto) - Number(f.detraccion_monto || 0), f.moneda)}</b></p>
+      <div class="fgrid">
+        ${lab('Estado', `<select name="estado"><option value="PENDIENTE" ${f.detraccion_estado !== 'DEPOSITADA' ? 'selected' : ''}>Por depositar</option><option value="DEPOSITADA" ${f.detraccion_estado === 'DEPOSITADA' ? 'selected' : ''}>Depositada</option></select>`)}
+        ${lab('Fecha del depósito', `<input name="fecha" type="date" value="${esc(f.detraccion_fecha || hoy)}">`)}
+        ${lab('Monto depositado en soles (S/)', `<input name="soles" type="number" step="any" value="${esc(f.detraccion_soles ?? '')}" placeholder="Según la constancia">`)}
+        ${lab('N° de constancia / operación', `<input name="const" value="${esc(f.detraccion_constancia || '')}" placeholder="N° de constancia de depósito">`)}
+        ${lab('Constancia de SUNAT (PDF o imagen)', `<input type="file" name="f" multiple accept="application/pdf,.pdf,image/*">`, true)}
+      </div>
+      ${(arch || []).length ? `<div class="small">Archivos ya cargados: ${(arch || []).map(a => esc(a.nombre)).join(', ')}</div>` : ''}
+      <div class="small prog"></div><div class="err" hidden></div>
+    </div>
+    <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">Guardar</button></footer></form></div>`;
+  const form = $modal.querySelector('form');
+  const cerrar = () => { $modal.innerHTML = ''; };
+  $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = cerrar);
+  if (f.detraccion_estado !== 'DEPOSITADA') form.estado.value = 'DEPOSITADA';
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const showErr = (m) => { const x = form.querySelector('.err'); x.hidden = false; x.textContent = m; };
+    const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+    const errs = [];
+    for (const [k, file] of [...form.f.files].entries()) {
+      form.querySelector('.prog').textContent = `Subiendo ${k + 1}…`;
+      const ff = await comprimir(file);
+      if (ff.size > 25 * 1024 * 1024) { errs.push(`${ff.name}: supera 25 MB`); continue; }
+      const path = `${proyectoId}/detraccion/${Date.now()}_${k}_${limpiarNombre(ff.name)}`;
+      const up = await sb.storage.from(BUCKET).upload(path, ff, { contentType: ff.type || 'application/pdf', upsert: false });
+      if (up.error) { errs.push(`${ff.name}: ${up.error.message}`); continue; }
+      const ins = await sb.from('proyecto_archivos').insert({ proyecto_id: proyectoId, factura_id: f.id, categoria: 'DETRACCION', storage_path: path, nombre: ff.name, mime: ff.type, tamano: ff.size, descripcion: `Constancia de detracción · factura ${f.numero_factura}`, subido_por: session.user.id });
+      if (ins.error) { await sb.storage.from(BUCKET).remove([path]); errs.push(`${ff.name}: ${ins.error.message}`); }
+    }
+    const v = (n) => form.elements[n].value.trim();
+    const { error } = await sb.from('proyecto_facturas').update({ detraccion_estado: v('estado'), detraccion_fecha: val(v('fecha')), detraccion_soles: v('soles') === '' ? null : Number(v('soles')), detraccion_constancia: val(v('const')) }).eq('id', f.id);
+    if (error) errs.push(error.message);
+    if (errs.length) { btn.disabled = false; form.querySelector('.prog').textContent = ''; return showErr(errs.join(' · ')); }
+    cerrar(); toast('Detracción registrada'); reload();
+  };
 }
 
 // ---------- guías de remisión (todas las OT) ----------

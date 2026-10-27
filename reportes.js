@@ -128,7 +128,8 @@ export async function fichaOT(d) {
   const { ing, sal, dias: dT } = fechasGuias(G);
   const Fv = F.filter(f => f.estado_cobro !== 'ANULADA');
   const facturado = sumaPorMoneda(Fv, 'monto'), cobrado = sumaPorMoneda(Fv, 'monto_cobrado');
-  const porCobrar = {}; Object.keys(facturado).forEach(k => porCobrar[k] = (facturado[k] || 0) - (cobrado[k] || 0));
+  const detr = sumaPorMoneda(Fv, 'detraccion_monto');
+  const porCobrar = {}; Object.keys(facturado).forEach(k => porCobrar[k] = (facturado[k] || 0) - (detr[k] || 0) - (cobrado[k] || 0));
   const compras = sumaPorMoneda(O.filter(o => o.estado !== 'anulada'), 'total');
 
   const cab = `<div class="cab"><div class="izq">Impreso: ${esc(hoyTexto())}<br>${esPI ? 'Proyecto interno' : 'Servicio a cliente'}</div>
@@ -219,7 +220,7 @@ export function filasGlobal(d) {
   return P.map(p => {
     const g = bG[p.id] || [], { ing, sal, dias: dT, ge, gs } = fechasGuias(g);
     const fs = (bF[p.id] || []).filter(f => f.estado_cobro !== 'ANULADA');
-    const fact = fs.reduce((t, f) => t + Number(f.monto || 0), 0), cob = fs.reduce((t, f) => t + Number(f.monto_cobrado || 0), 0);
+    const fact = fs.reduce((t, f) => t + Number(f.monto || 0), 0), cob = fs.reduce((t, f) => t + Number(f.monto_cobrado || 0), 0), detr = fs.reduce((t, f) => t + Number(f.detraccion_monto || 0), 0);
     const monF = fs[0]?.moneda || p.moneda || 'SOLES';
     const ocs = (bO[p.id] || []).filter(o => o.estado !== 'anulada');
     const compras = sumaPorMoneda(ocs, 'total');
@@ -233,7 +234,7 @@ export function filasGlobal(d) {
       ingreso: ing?.fecha || '', guiaIng: ing?.numero_guia || '', salida: sal?.fecha || '', guiaSal: sal?.numero_guia || '', dias: dT,
       nGe: ge.length, nGs: gs.length, comps: (bC[p.id] || []).length, informe: (bI[p.id] || []).map(i => i.numero).join(', ') || p.numero_informe || '',
       reqs: (bS[p.id] || []).length, nOc: ocs.length, comprasS: compras.SOLES || 0, comprasD: compras.DOLARES || 0,
-      facturas: fs.map(f => f.numero_factura).join(', '), monedaFact: monF, facturado: fact, cobrado: cob, porCobrar: fact - cob, estCobro,
+      facturas: fs.map(f => f.numero_factura).join(', '), monedaFact: monF, facturado: fact, cobrado: cob, detraccion: detr, porCobrar: fact - detr - cob, estCobro,
       creado: p.created_at ? String(p.created_at).slice(0, 10) : '', observaciones: p.observaciones || '',
     };
   });
@@ -313,8 +314,8 @@ export async function reporteGlobalExcel(d) {
   const otDe = Object.fromEntries(filas.map(f => [f.p.id, f]));
   const facts = (d.F || []).filter(x => otDe[x.proyecto_id]);
   if (facts.length) hoja('Facturas',
-    ['OT', 'Cliente', 'Factura', 'Emisión', 'Vence', 'Moneda', 'Monto', 'Cobrado', 'Saldo', 'Estado', 'Fecha cobro'],
-    facts.map(x => [otDe[x.proyecto_id].ot, otDe[x.proyecto_id].cliente, x.numero_factura, fecha(x.fecha_emision), fecha(x.fecha_vencimiento), x.moneda === 'DOLARES' ? 'US$' : 'S/', Number(x.monto || 0), Number(x.monto_cobrado || 0), Number(x.monto || 0) - Number(x.monto_cobrado || 0), d.etiquetas.EST_COBRO[x.estado_cobro] || x.estado_cobro, fecha(x.fecha_cobro)]),
-    [14, 32, 14, 11, 11, 7, 12, 12, 12, 12, 11]);
+    ['OT', 'Cliente', 'Factura', 'Emisión', 'Vence', 'Moneda', 'Monto', 'Detracción', 'Neto a cobrar', 'Cobrado', 'Saldo', 'Estado', 'Fecha cobro', 'Detracción depositada'],
+    facts.map(x => [otDe[x.proyecto_id].ot, otDe[x.proyecto_id].cliente, x.numero_factura, fecha(x.fecha_emision), fecha(x.fecha_vencimiento), x.moneda === 'DOLARES' ? 'US$' : 'S/', Number(x.monto || 0), Number(x.detraccion_monto || 0), Number(x.monto || 0) - Number(x.detraccion_monto || 0), Number(x.monto_cobrado || 0), Number(x.monto || 0) - Number(x.detraccion_monto || 0) - Number(x.monto_cobrado || 0), d.etiquetas.EST_COBRO[x.estado_cobro] || x.estado_cobro, fecha(x.fecha_cobro), x.detraccion_pct == null ? 'No aplica' : x.detraccion_estado === 'DEPOSITADA' ? 'Sí' + (x.detraccion_fecha ? ' · ' + String(x.detraccion_fecha).slice(0, 10).split('-').reverse().join('/') : '') : 'Pendiente']),
+    [14, 32, 14, 11, 11, 7, 12, 12, 13, 12, 12, 12, 11, 16]);
   XLSX.writeFile(wb, `Reporte_global_Maestro_${new Date().toISOString().slice(0, 10)}.xlsx`, { cellDates: true });
 }
