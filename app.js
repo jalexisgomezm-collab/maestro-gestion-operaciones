@@ -1306,12 +1306,6 @@ async function abrirRotulo({ s, C, G, F }){
         ${lab('Guía de remisión', inp('guia', base.guia, 'EG07-…'))}
         ${lab('Fecha de despacho', inp('fecha', base.fecha, 'dd/mm/aaaa'))}
       </div>
-      <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Contacto que figura en el rótulo (${esc(base.contacto.area)} · ${esc(base.contacto.nombres)})</summary>
-        <div class="fgrid" style="margin-top:8px">
-          ${lab('Área', inp('k_area', base.contacto.area))}${lab('Nombre', inp('k_nom', base.contacto.nombres))}
-          ${lab('Teléfonos', inp('k_tel', base.contacto.telefonos))}${lab('Correo', inp('k_mail', base.contacto.correo))}
-          ${lab('Dirección', inp('k_dir', base.contacto.direccion), true)}
-        </div></details>
       <div class="err" hidden></div>
     </div>
     <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">Guardar e imprimir rótulo</button></footer></form></div>`;
@@ -1340,7 +1334,6 @@ async function abrirRotulo({ s, C, G, F }){
       items: sel.map((c, i) => ({ item: pad(i + 1), descripcion: c.descripcion || '', numeroParte: c.numero_parte || '', numeroSerie: c.numero_serie || '', cantidad: form.querySelector(`[data-cq="${c.id}"]`)?.value.trim() || String(c.cantidad ?? 1), _cid: c.id })),
       bulto: { actual: pad(v('b_actual') || '1'), total: pad(v('b_total') || '1'), tipo: v('b_tipo') },
       peso: v('peso'), dimensiones: v('dims'), preparadoPor: v('prep'),
-      contacto: { area: v('k_area'), nombres: v('k_nom'), telefonos: v('k_tel'), correo: v('k_mail'), direccion: v('k_dir') },
     };
     const w = window.open('about:blank', '_blank');  // se abre ya (si se espera al guardado, el navegador lo bloquea)
     const btn = form.querySelector('[type=submit]'); btn.disabled = true;
