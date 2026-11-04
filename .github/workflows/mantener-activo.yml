@@ -17,13 +17,12 @@ jobs:
     steps:
       - name: Supabase (base de datos y acceso)
         run: |
-          set -e
-          a=$(curl -s -o /dev/null -w "%{http_code}" "$SB_URL/auth/v1/settings" -H "apikey: $SB_KEY")
-          b=$(curl -s -o /dev/null -w "%{http_code}" "$SB_URL/rest/v1/proyectos?select=id&limit=1" -H "apikey: $SB_KEY")
+          a=$(curl -s --retry 4 --retry-delay 5 --retry-all-errors --max-time 30 -o /dev/null -w "%{http_code}" "$SB_URL/auth/v1/settings" -H "apikey: $SB_KEY" || true)
+          b=$(curl -s --retry 4 --retry-delay 5 --retry-all-errors --max-time 30 -o /dev/null -w "%{http_code}" "$SB_URL/rest/v1/proyectos?select=id&limit=1" -H "apikey: $SB_KEY" || true)
           echo "Auth: $a · Consulta a la base: $b"
           if [ "$a" -ge 500 ] || [ "$a" = "000" ] || [ "$b" -ge 500 ] || [ "$b" = "000" ]; then echo "Supabase no respondió"; exit 1; fi
       - name: Webs (Vercel)
         run: |
           for u in https://maestro-gestion-operaciones.vercel.app https://gto-oc-sistema-app.vercel.app; do
-            c=$(curl -s -o /dev/null -w "%{http_code}" -L "$u"); echo "$u -> $c"
+            c=$(curl -s --retry 4 --retry-delay 5 --retry-all-errors --max-time 30 -o /dev/null -w "%{http_code}" -L "$u" || true); echo "$u -> $c"
           done
