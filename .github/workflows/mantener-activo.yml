@@ -1,0 +1,29 @@
+name: Mantener servicios activos
+
+# Cada 2 días (08:23 hora de Perú) hace una consulta real a Supabase (BD de órdenes de compra / Maestro)
+# para que el plan gratuito no se pause por inactividad, y visita las webs del Maestro y del Sistema OC.
+on:
+  schedule:
+    - cron: "23 13 */2 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SB_URL: https://cbguxckfkaxytgzxvpxe.supabase.co
+      SB_KEY: sb_publishable_yx0C0-9u7_Z4FsfkFRPm8g__2FsSEf4
+    steps:
+      - name: Supabase (base de datos y acceso)
+        run: |
+          set -e
+          a=$(curl -s -o /dev/null -w "%{http_code}" "$SB_URL/auth/v1/settings" -H "apikey: $SB_KEY")
+          b=$(curl -s -o /dev/null -w "%{http_code}" "$SB_URL/rest/v1/proyectos?select=id&limit=1" -H "apikey: $SB_KEY")
+          echo "Auth: $a · Consulta a la base: $b"
+          if [ "$a" -ge 500 ] || [ "$a" = "000" ] || [ "$b" -ge 500 ] || [ "$b" = "000" ]; then echo "Supabase no respondió"; exit 1; fi
+      - name: Webs (Vercel)
+        run: |
+          for u in https://maestro-gestion-operaciones.vercel.app https://gto-oc-sistema-app.vercel.app; do
+            c=$(curl -s -o /dev/null -w "%{http_code}" -L "$u"); echo "$u -> $c"
+          done
