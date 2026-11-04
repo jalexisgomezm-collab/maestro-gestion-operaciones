@@ -1,7 +1,7 @@
 name: Mantener servicios activos
 
 # Cada 2 días (08:23 hora de Perú) hace una consulta real a Supabase (BD de órdenes de compra / Maestro)
-# para que el plan gratuito no se pause por inactividad, y visita las webs del Maestro y del Sistema OC.
+# y a Supabase de RRHH, para que el plan gratuito no se pause por inactividad, y visita las webs del Maestro y del Sistema OC.
 on:
   schedule:
     - cron: "23 13 */2 * *"
@@ -21,8 +21,17 @@ jobs:
           b=$(curl -s --retry 4 --retry-delay 5 --retry-all-errors --max-time 30 -o /dev/null -w "%{http_code}" "$SB_URL/rest/v1/proyectos?select=id&limit=1" -H "apikey: $SB_KEY" || true)
           echo "Auth: $a · Consulta a la base: $b"
           if [ "$a" -ge 500 ] || [ "$a" = "000" ] || [ "$b" -ge 500 ] || [ "$b" = "000" ]; then echo "Supabase no respondió"; exit 1; fi
+      - name: Supabase RRHH (gto-rrhh)
+        env:
+          RH_URL: https://truriveytcotvhyfqfxw.supabase.co
+          RH_KEY: sb_publishable__5x9vSJ6RWl_L_AId_25pg_QYSufNDb
+        run: |
+          a=$(curl -s --retry 4 --retry-delay 5 --retry-all-errors --max-time 30 -o /dev/null -w "%{http_code}" "$RH_URL/auth/v1/settings" -H "apikey: $RH_KEY" || true)
+          b=$(curl -s --retry 4 --retry-delay 5 --retry-all-errors --max-time 30 -o /dev/null -w "%{http_code}" "$RH_URL/rest/v1/rrhh?select=*&limit=1" -H "apikey: $RH_KEY" || true)
+          echo "Auth: $a · Consulta a la base: $b"
+          if [ "$a" -ge 500 ] || [ "$a" = "000" ] || [ "$b" -ge 500 ] || [ "$b" = "000" ]; then echo "Supabase RRHH no respondió"; exit 1; fi
       - name: Webs (Vercel)
         run: |
-          for u in https://maestro-gestion-operaciones.vercel.app https://gto-oc-sistema-app.vercel.app; do
+          for u in https://maestro-gestion-operaciones.vercel.app https://gto-oc-sistema-app.vercel.app https://gto-rrhh.vercel.app; do
             c=$(curl -s --retry 4 --retry-delay 5 --retry-all-errors --max-time 30 -o /dev/null -w "%{http_code}" -L "$u" || true); echo "$u -> $c"
           done
