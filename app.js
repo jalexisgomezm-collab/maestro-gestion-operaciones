@@ -5,6 +5,7 @@ const SUPABASE_URL = 'https://cbguxckfkaxytgzxvpxe.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_yx0C0-9u7_Z4FsfkFRPm8g__2FsSEf4';
 const OC_APP = 'https://gto-oc-sistema-app.vercel.app';
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+window.DirectorioGTO_opts = { sb };  // directorio de correos: administración puede editar
 
 const $app = document.getElementById('app');
 const $modal = document.getElementById('modal-root');
@@ -105,6 +106,7 @@ function shell(inner){
     <a href="#/informes" style="color:#fff;font-size:13px;font-weight:500">Informes técnicos</a>
     ${!LAB() || VE_GUIAS ? '<a href="#/guias" style="color:#fff;font-size:13px;font-weight:500">Guías de remisión</a>' : ''}
     ${LAB() ? '' : '<a href="#/factoring" style="color:#fff;font-size:13px;font-weight:500">Factoring</a>'}
+    <a href="#" data-directorio-gto title="Directorio de correos de GTO para copiar al enviar formatos" style="color:#fff;font-size:13px;font-weight:500">✉ Correos</a>
     <a href="${OC_APP}" target="_blank" rel="noopener" style="color:#cbd5e1;font-size:13px">Sistema OC ↗</a>
     <span class="user">${esc(session?.user?.email)}</span>
     <button class="sm" id="logout">Salir</button></header><main>${inner}</main>`;
