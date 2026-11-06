@@ -105,6 +105,7 @@ function shell(inner){
     ${LAB() ? `<span class="badge b-pi" style="margin-right:4px">${VE_GUIAS ? 'Vista técnica' : 'Laboratorio'}</span>`+'<a href="#/" style="color:#fff;font-size:13px;font-weight:500">Servicios</a>' : ''}
     <a href="#/informes" style="color:#fff;font-size:13px;font-weight:500">Informes técnicos</a>
     ${!LAB() || VE_GUIAS ? '<a href="#/guias" style="color:#fff;font-size:13px;font-weight:500">Guías de remisión</a>' : ''}
+    ${LAB() ? '' : '<a href="#/propuestas" style="color:#fff;font-size:13px;font-weight:500">Propuestas técnicas</a>'}
     ${LAB() ? '' : '<a href="#/factoring" style="color:#fff;font-size:13px;font-weight:500">Factoring</a>'}
     <a href="#" data-directorio-gto title="Directorio de correos de GTO para copiar al enviar formatos" style="color:#fff;font-size:13px;font-weight:500">✉ Correos</a>
     <a href="${OC_APP}" target="_blank" rel="noopener" style="color:#cbd5e1;font-size:13px">Sistema OC ↗</a>
@@ -278,6 +279,154 @@ async function renderInformes(){
   document.getElementById('inf-q').oninput = (e) => { filtroInf.q = e.target.value; clearTimeout(window._iq); window._iq = setTimeout(() => renderInformes().then(() => { const i = document.getElementById('inf-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
   document.getElementById('inf-tipo').onchange = (e) => { filtroInf.tipo = e.target.value; renderInformes(); };
   bindFilasInforme($app, lista, renderInformes);
+}
+
+// ---------- propuestas técnicas (biblioteca reutilizable · correlativo PT-AAAA-NNNN) ----------
+const EST_PT = { BORRADOR:'Borrador', ENVIADA:'Enviada', ADJUDICADA:'Adjudicada', NO_ADJUDICADA:'No adjudicada' };
+const BADGE_PT = { BORRADOR:'EN_EVALUACION', ENVIADA:'PENDIENTE_OC', ADJUDICADA:'CON_OC', NO_ADJUDICADA:'DEVUELTO' };
+const archivosPT = (p) => [...(p.propuesta_archivos || [])].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+async function subirArchivosPT(ptId, files, prog){
+  const errs = [];
+  for (let k = 0; k < files.length; k++) {
+    if (prog) prog.textContent = `Subiendo archivo ${k+1} de ${files.length}…`;
+    let f = files[k];
+    if (!f.type) { const ext = (f.name.split('.').pop() || '').toLowerCase(); if (MIME_EXT[ext]) f = new File([f], f.name, { type: MIME_EXT[ext] }); }
+    if (!/pdf|msword|wordprocessingml|^image\//.test(f.type)) { errs.push(`${f.name}: debe ser PDF, Word o imagen`); continue; }
+    if (f.size > 25*1024*1024) { errs.push(`${f.name}: supera 25 MB`); continue; }
+    const path = `propuestas/${ptId}/${Date.now()}_${k}_${limpiarNombre(f.name)}`;
+    const up = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
+    if (up.error) { errs.push(`${f.name}: ${up.error.message}`); continue; }
+    const ins = await sb.from('propuesta_archivos').insert({ propuesta_id: ptId, storage_path: path, nombre: f.name, mime: f.type, tamano: f.size });
+    if (ins.error) { await sb.storage.from(BUCKET).remove([path]); errs.push(`${f.name}: ${ins.error.message}`); }
+  }
+  return errs;
+}
+function editarPropuesta(pt = null, base = null){
+  return new Promise(async resolve => {
+    const proys = await listaProyectosSimple();
+    const src = pt || base || {};
+    const hoy = new Date().toISOString().slice(0,10);
+    const urls = pt ? await firmarUrls(archivosPT(pt)) : {};
+    const opt = (o, sel) => Object.entries(o).map(([k,l]) => `<option value="${k}" ${sel === k ? 'selected' : ''}>${l}</option>`).join('');
+    $modal.innerHTML = `<div class="ov"><form class="modal" novalidate style="max-width:760px">
+      <header><h2>${pt ? `Editar propuesta <span class="mono">${esc(pt.numero)}</span>` : base ? `Nueva propuesta a partir de <span class="mono">${esc(base.numero)}</span>` : 'Nueva propuesta técnica'}</h2><button type="button" class="link" data-x>✕</button></header>
+      <div class="body"><div class="fgrid">
+        <label class="f full"><span>Título *</span><input name="titulo" required value="${esc(src.titulo || '')}" placeholder="Ej. Propuesta técnica – mantenimiento de módulos de potencia ACS800"></label>
+        <label class="f"><span>Cliente</span><input name="cliente" list="dl-pt-cli" autocomplete="off" value="${esc(pt ? pt.cliente || '' : '')}"><datalist id="dl-pt-cli"></datalist></label>
+        <label class="f"><span>Referencia del cliente (PR, RFQ, SOLPED…)</span><input name="referencia" value="${esc(pt ? pt.referencia || '' : '')}" placeholder="Ej. PR 11659482_30"></label>
+        <label class="f"><span>Equipo / marca / modelo</span><input name="equipo" value="${esc(src.equipo || '')}" placeholder="Ej. Variador ABB ACS800 – módulos de potencia"></label>
+        <label class="f"><span>Versión</span><input name="version" value="${esc(pt ? pt.version : base ? String(Number(base.version || 1) + 1).padStart(2, '0') : '01')}"></label>
+        <label class="f"><span>Fecha</span><input type="date" name="fecha" value="${esc(pt?.fecha || hoy)}"></label>
+        <label class="f"><span>Estado</span><select name="estado">${opt(EST_PT, pt?.estado || (base ? 'BORRADOR' : 'ENVIADA'))}</select></label>
+        <label class="f"><span>N° de cotización</span><input name="numero_cotizacion" list="dl-pt-cot" autocomplete="off" value="${esc(pt?.numero_cotizacion || '')}"><datalist id="dl-pt-cot"></datalist></label>
+        <label class="f"><span>OT vinculada (si se adjudica)</span><select name="proyecto_id"><option value="">— Sin OT —</option>${proys.map(p => `<option value="${p.id}" ${p.id === pt?.proyecto_id ? 'selected' : ''}>${esc(p.numero_orden_trabajo || '')} · ${esc(p.nombre || '')}${p.cliente ? ' · ' + esc(p.cliente) : ''}</option>`).join('')}</select></label>
+        <label class="f full"><span>${pt ? 'Agregar archivos' : 'Archivos de la propuesta'} (Word y PDF)</span><input type="file" name="f" multiple accept="${ACEPTA_INF}"></label>
+        <label class="f full"><span>Notas (qué contiene, en qué se puede reutilizar)</span><textarea name="observaciones" rows="2">${esc(src.observaciones || '')}</textarea></label>
+      </div>
+      ${pt && archivosPT(pt).length ? `<div class="small" style="margin-top:6px"><b>Archivos actuales:</b> ${archivosPT(pt).map(a => `<span style="white-space:nowrap">${urls[a.storage_path] ? `<a href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener"${esWord(a) ? ` download="${esc(a.nombre)}"` : ''}>${esc(a.nombre)}</a>` : esc(a.nombre)} <button type="button" class="link sm danger" data-rmf="${a.id}" title="Quitar este archivo">✕</button></span>`).join(' · ')}</div>` : ''}
+      ${base && archivosPT(base).length ? `<p class="small" style="margin-top:6px">Se copiarán los ${archivosPT(base).length} archivo(s) de <b>${esc(base.numero)}</b> como punto de partida.</p>` : ''}
+      <p class="small" style="margin-top:8px">${pt ? 'El número no cambia.' : 'El número <b>PT-AAAA-NNNN</b> se asigna solo al guardar.'}</p>
+      <div class="prog small"></div><div class="err" hidden></div></div>
+      <footer><button type="button" data-x>Cancelar</button><button class="pri" type="submit">${pt ? 'Guardar cambios' : 'Guardar propuesta'}</button></footer></form></div>`;
+    const form = $modal.querySelector('form');
+    const fin = (v) => { $modal.innerHTML = ''; resolve(v); };
+    $modal.querySelectorAll('[data-x]').forEach(b => b.onclick = () => fin(false));
+    const showErr = (m) => { const e = form.querySelector('.err'); e.hidden = false; e.innerHTML = esc(m).replace(/\n/g, '<br>'); };
+    form.proyecto_id.onchange = () => { const p = proys.find(x => x.id === form.proyecto_id.value); if (p && !form.cliente.value.trim() && p.cliente) form.cliente.value = p.cliente; };
+    listasCotizador().then(({ clientes, cotizaciones }) => {
+      if (!form.isConnected) return;
+      document.getElementById('dl-pt-cot').innerHTML = cotizaciones.map(q => `<option value="${esc(q.numero)}">${esc([q.cliente, q.referencia].filter(Boolean).join(' · '))}</option>`).join('');
+      document.getElementById('dl-pt-cli').innerHTML = clientes.map(c => `<option value="${esc(c.razon_social)}"></option>`).join('');
+    }).catch(() => {});
+    $modal.querySelectorAll('[data-rmf]').forEach(b => b.onclick = async () => {
+      const a = archivosPT(pt).find(x => x.id === b.dataset.rmf); if (!a) return;
+      if (!confirm(`¿Quitar el archivo "${a.nombre}"? No se puede recuperar.`)) return;
+      await sb.storage.from(BUCKET).remove([a.storage_path]);
+      const { error } = await sb.from('propuesta_archivos').delete().eq('id', a.id);
+      if (error) return showErr(error.message);
+      pt.propuesta_archivos = pt.propuesta_archivos.filter(x => x.id !== a.id); b.parentElement.remove(); toast('Archivo quitado');
+    });
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const d = { titulo: form.titulo.value.trim(), cliente: val(form.cliente.value.trim()), referencia: val(form.referencia.value.trim()), equipo: val(form.equipo.value.trim()),
+        version: form.version.value.trim() || '01', fecha: form.fecha.value || hoy, estado: form.estado.value, numero_cotizacion: val(form.numero_cotizacion.value.trim()),
+        proyecto_id: form.proyecto_id.value || null, observaciones: val(form.observaciones.value.trim()) };
+      if (!d.titulo) return showErr('Escribe el título de la propuesta');
+      const files = [...form.f.files];
+      const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+      try {
+        const r = pt ? chk(await sb.from('propuestas_tecnicas').update(d).eq('id', pt.id).select('id,numero').single())
+                     : chk(await sb.from('propuestas_tecnicas').insert(d).select('id,numero').single());
+        const errs = [];
+        if (base) {  // copia los archivos de la propuesta base
+          const prog = form.querySelector('.prog');
+          for (const [k, a] of archivosPT(base).entries()) {
+            prog.textContent = `Copiando archivo ${k+1} de ${archivosPT(base).length}…`;
+            const destino = `propuestas/${r.id}/${Date.now()}_c${k}_${limpiarNombre(a.nombre)}`;
+            const cp = await sb.storage.from(BUCKET).copy(a.storage_path, destino);
+            if (cp.error) { errs.push(`${a.nombre}: ${cp.error.message}`); continue; }
+            const ins = await sb.from('propuesta_archivos').insert({ propuesta_id: r.id, storage_path: destino, nombre: a.nombre, mime: a.mime, tamano: a.tamano });
+            if (ins.error) errs.push(`${a.nombre}: ${ins.error.message}`);
+          }
+        }
+        if (files.length) errs.push(...await subirArchivosPT(r.id, files, form.querySelector('.prog')));
+        if (errs.length) { showErr(`Propuesta ${r.numero} guardada, pero hubo problemas con algunos archivos:\n${errs.join('\n')}`); btn.textContent = 'Cerrar'; btn.disabled = false; btn.onclick = (ev) => { ev.preventDefault(); fin(true); }; return; }
+        toast(pt ? `Propuesta ${r.numero} actualizada` : `Propuesta ${r.numero} guardada`); fin(true);
+      } catch (err) { showErr(err.message); btn.disabled = false; }
+    };
+  });
+}
+async function eliminarPropuesta(p){
+  if (!await confirmModal(`¿Eliminar la propuesta ${p.numero} y sus ${archivosPT(p).length} archivo(s)? No se puede recuperar.`)) return false;
+  const l = archivosPT(p);
+  if (l.length) await sb.storage.from(BUCKET).remove(l.map(a => a.storage_path));
+  const { error } = await sb.from('propuestas_tecnicas').delete().eq('id', p.id);
+  if (error) { toast(error.message); return false; }
+  toast(`Propuesta ${p.numero} eliminada`); return true;
+}
+let filtroPT = { q: '', estado: 'TODOS' };
+async function renderPropuestas(){
+  $app.innerHTML = shell('<div class="loading">Cargando…</div>'); bindShell();
+  const { data, error } = await sb.from('propuestas_tecnicas').select('*, propuesta_archivos(*), proyectos(numero_orden_trabajo)').order('numero', { ascending:false });
+  if (error) { $app.querySelector('main').innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  const lista = data || [];
+  const urls = await firmarUrls(lista.flatMap(archivosPT));
+  const q = filtroPT.q.toLowerCase();
+  const rows = lista.filter(p => (filtroPT.estado === 'TODOS' || p.estado === filtroPT.estado) &&
+    (!q || [p.numero, p.titulo, p.cliente, p.referencia, p.equipo, p.numero_cotizacion, p.observaciones, p.proyectos?.numero_orden_trabajo].some(x => (x || '').toLowerCase().includes(q))));
+  const kpi = (k, n, l) => `<div class="kpi ${filtroPT.estado===k?'sel':''}" data-k="${k}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const cnt = (k) => lista.filter(p => p.estado === k).length;
+  const enlaces = (p) => { const l = archivosPT(p); return l.length ? l.map(a => urls[a.storage_path] ? `<a class="link-sm" href="${esc(urls[a.storage_path])}" target="_blank" rel="noopener" title="${esc(a.nombre)}"${esWord(a) ? ` download="${esc(a.nombre)}"` : ''}><span class="doc-tag ${esWord(a)?'w':'p'}">${tipoDoc(a)}</span></a>` : '').join(' ') : '<span class="small">Sin archivo</span>'; };
+  $app.querySelector('main').innerHTML = `
+    <div class="row" style="justify-content:space-between">
+      <div><h1>Propuestas técnicas</h1><div class="sub">Biblioteca de propuestas técnicas presentadas a clientes, para consultarlas y reutilizarlas como base en otras ocasiones.</div></div>
+      <button class="pri" id="pt-nueva">+ Nueva propuesta</button>
+    </div>
+    <div class="kpis">${kpi('TODOS', lista.length, 'Propuestas guardadas')}${kpi('BORRADOR', cnt('BORRADOR'), 'Borradores')}${kpi('ENVIADA', cnt('ENVIADA'), 'Enviadas')}${kpi('ADJUDICADA', cnt('ADJUDICADA'), 'Adjudicadas')}${kpi('NO_ADJUDICADA', cnt('NO_ADJUDICADA'), 'No adjudicadas')}</div>
+    <div class="panel">
+      <div class="toolbar">
+        <input type="search" id="pt-q" placeholder="Buscar N°, título, cliente, equipo (ej. ACS800), referencia…" value="${esc(filtroPT.q)}">
+        <div style="flex:1"></div><span class="small">${rows.length} propuesta(s)</span>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>N°</th><th>Propuesta</th><th>Cliente / referencia</th><th>Fecha · versión</th><th>Estado</th><th>Cotización / OT</th><th>Archivos</th><th></th></tr></thead>
+      <tbody>${rows.map(p => `<tr>
+        <td class="mono" style="font-weight:500;white-space:nowrap">${esc(p.numero || '—')}</td>
+        <td><div style="font-weight:500">${esc(p.titulo)}</div>${p.equipo ? `<div class="small">${esc(p.equipo)}</div>` : ''}${p.observaciones ? `<div class="small" style="color:#5b6b62">${esc(p.observaciones)}</div>` : ''}</td>
+        <td>${esc(p.cliente || '—')}${p.referencia ? `<div class="small mono">${esc(p.referencia)}</div>` : ''}</td>
+        <td style="white-space:nowrap">${fdate(p.fecha)}<div class="small">Rev. ${esc(p.version || '01')}</div></td>
+        <td>${badge(BADGE_PT[p.estado] || 'op', EST_PT[p.estado] || p.estado)}</td>
+        <td class="mono" style="white-space:nowrap">${esc(p.numero_cotizacion || '—')}${p.proyectos ? `<div><a href="#/servicio/${p.proyecto_id}">${esc(p.proyectos.numero_orden_trabajo)}</a></div>` : ''}</td>
+        <td style="white-space:nowrap">${enlaces(p)}</td>
+        <td style="white-space:nowrap;text-align:right"><button class="link sm" data-pt-base="${p.id}" title="Crear una nueva propuesta copiando esta (datos y archivos)">Usar como base</button><button class="link sm" data-pt-e="${p.id}">Editar</button><button class="link sm danger" data-pt-d="${p.id}">Eliminar</button></td>
+      </tr>`).join('') || '<tr><td colspan="8" class="empty">No hay propuestas con este filtro.</td></tr>'}</tbody></table></div>
+    </div>`;
+  document.getElementById('pt-nueva').onclick = async () => { if (await editarPropuesta()) renderPropuestas(); };
+  document.getElementById('pt-q').oninput = (e) => { filtroPT.q = e.target.value; clearTimeout(window._ptq); window._ptq = setTimeout(() => renderPropuestas().then(() => { const i = document.getElementById('pt-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
+  $app.querySelectorAll('.kpi[data-k]').forEach(k => k.onclick = () => { filtroPT.estado = k.dataset.k; renderPropuestas(); });
+  const buscar = (id) => lista.find(x => x.id === id);
+  $app.querySelectorAll('[data-pt-e]').forEach(b => b.onclick = async () => { const p = buscar(b.dataset.ptE); if (p && await editarPropuesta(p)) renderPropuestas(); });
+  $app.querySelectorAll('[data-pt-base]').forEach(b => b.onclick = async () => { const p = buscar(b.dataset.ptBase); if (p && await editarPropuesta(null, p)) renderPropuestas(); });
+  $app.querySelectorAll('[data-pt-d]').forEach(b => b.onclick = async () => { const p = buscar(b.dataset.ptD); if (p && await eliminarPropuesta(p)) renderPropuestas(); });
 }
 
 // ---------- reportes ----------
@@ -2030,6 +2179,7 @@ async function route(){
   }
   if (m) return renderDetalle(m[1]);
   if (location.hash.startsWith('#/informes')) return renderInformes();
+  if (location.hash.startsWith('#/propuestas')) return renderPropuestas();
   if (location.hash.startsWith('#/factoring')) return renderFactoring();
   if (location.hash.startsWith('#/guias')) return renderGuias();
   return renderLista();
