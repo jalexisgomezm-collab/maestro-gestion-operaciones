@@ -82,20 +82,24 @@ function confirmModal(msg){
 const chk = ({ error, data }) => { if (error) throw new Error(error.message); return data; };
 
 // ---------- login ----------
+const GTO_MENU = 'https://sistema-integrado-gto.vercel.app';
 function renderLogin(){
-  $app.innerHTML = `<form class="login">
-    <h1>Maestro de Gestión</h1><div class="sub">GTO PERU · Operaciones</div>
-    <label class="f"><span>Correo</span><input name="email" type="email" autocomplete="username" required></label>
-    <label class="f"><span>Contraseña</span><input name="pass" type="password" autocomplete="current-password" required></label>
-    <button class="pri" type="submit">Ingresar</button>
-    <div class="err" hidden></div>
-    <p class="small" style="margin-top:14px">Usa el mismo usuario del sistema de órdenes de compra.</p>
-  </form>`;
+  $app.innerHTML = `<div class="gto"><div class="gto-login" style="min-height:100vh">
+    <div class="panel" role="img" aria-label="GTO · Minería, industria y ferrovías" style="background-image:url(${GTO_MENU}/assets/panel-sectores.jpg)"></div>
+    <div class="form"><form class="caja">
+      <div class="marca"><img src="${GTO_MENU}/assets/icono-maestro.png" alt=""><div><small>Sistema Integrado GTO</small><b>Maestro de Gestión de Operaciones</b></div></div>
+      <div class="gto-aviso gto-aviso--error err" role="alert" hidden><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></span><div><b>No se pudo ingresar</b><p>Correo o contraseña incorrectos.</p></div></div>
+      <div class="gto-campo"><label for="l-email">Correo</label><input id="l-email" class="gto-input" name="email" type="email" autocomplete="username" placeholder="nombre@gtoperu.com" required></div>
+      <div class="gto-campo"><label for="l-pass">Contraseña</label><input id="l-pass" class="gto-input" name="pass" type="password" autocomplete="current-password" required></div>
+      <button class="gto-btn gto-btn--primario" type="submit" style="width:100%">Ingresar</button>
+      <span class="gto-ayuda" style="text-align:center">Usa el mismo usuario del sistema de Logística y Compras.</span>
+      <a class="volver" href="${GTO_MENU}">← Volver al menú</a>
+    </form></div></div></div>`;
   const f = $app.querySelector('form');
   f.onsubmit = async (e) => {
     e.preventDefault();
     const { error } = await sb.auth.signInWithPassword({ email: f.email.value.trim(), password: f.pass.value });
-    if (error) { const el=f.querySelector('.err'); el.hidden=false; el.textContent='Correo o contraseña incorrectos.'; }
+    if (error) { f.querySelector('.err').hidden=false; }
   };
 }
 
