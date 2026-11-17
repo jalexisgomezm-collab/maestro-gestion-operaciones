@@ -50,7 +50,7 @@
         const cells = Array.from(row.cells);
         const card = element('article', 'gto-board-card');
         card.append(element('div', 'gto-board-code', cells[0]?.textContent.trim() || '—'));
-        const title = cells[1]?.querySelector('div:not(.small)')?.textContent.trim() || cells[1]?.textContent.trim() || '—';
+        const title = cells[1]?.querySelector('div:not(.small), strong')?.textContent.trim() || cells[1]?.textContent.trim() || '—';
         card.append(element('h3', '', title));
         const secondary = cells[1]?.querySelector('.small')?.textContent.trim();
         if (secondary) card.append(element('p', 'gto-board-secondary', secondary));
