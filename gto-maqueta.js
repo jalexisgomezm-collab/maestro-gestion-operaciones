@@ -84,7 +84,29 @@
       if (b.dataset.maq) return; const m = ICON_TAB.find(([re]) => re.test(b.textContent)); if (m) conIcono(b, m[1]);
     });
   }
-  function aplicar() { try { cabecera(); ficha(); } catch (e) { /* solo diseño: si algo falla, la pantalla sigue igual */ } }
+  // Clima y tipo de cambio a la vista en la barra (como la hora); se mueven dentro de la misma barra,
+  // así siguen actualizándose solos. Sistema OC se oculta y Correos pasa al menú lateral.
+  function indicadores() {
+    const bar = root.querySelector('.gto-shared-toolbar'); if (!bar) return;
+    const barra = bar.querySelector('.barra'); const reloj = barra && barra.querySelector('.chip.reloj');
+    const ind = bar.querySelector('.gto-toolbar-indicators');
+    if (reloj && ind) {
+      ind.querySelectorAll('.gto-toolbar-popover > .chip').forEach(c => { c.classList.add('gto-maq-chip'); reloj.before(c); });
+      if (!ind.querySelector('.gto-toolbar-popover > *')) ind.classList.add('gto-maq-oculto');
+    }
+    bar.querySelectorAll('.gto-toolbar-quick :is(a,button)').forEach(el => {
+      if (/sistema oc|log[ií]stica/i.test(el.textContent)) el.classList.add('gto-maq-oculto');
+    });
+    const correos = Array.from(bar.querySelectorAll('.gto-toolbar-quick :is(a,button)')).find(el => /correos/i.test(el.textContent));
+    const nav = root.querySelector('.ops-navigation');
+    if (correos && nav && !nav.querySelector('.gto-maq-correos')) {
+      const a = document.createElement('a'); a.href = '#/correos'; a.className = 'gto-maq-correos'; a.setAttribute('role', 'button');
+      const ic = svg('mail'); ic.removeAttribute('class'); a.append(ic, document.createTextNode('Correos'));
+      a.addEventListener('click', e => { e.preventDefault(); root.classList.remove('ops-menu-open'); correos.click(); });
+      nav.append(a); correos.classList.add('gto-maq-oculto');
+    }
+  }
+  function aplicar() { try { cabecera(); indicadores(); ficha(); } catch (e) { /* solo diseño: si algo falla, la pantalla sigue igual */ } }
   new MutationObserver(aplicar).observe(root, { childList: true, subtree: true });
   aplicar();
 })();

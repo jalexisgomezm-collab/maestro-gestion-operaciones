@@ -69,4 +69,12 @@
 #app .gto-shared-toolbar .gto-toolbar-popover :is(.gto-toolbar-action,button,a){background:#fff!important;color:#064925!important;border:1px solid #CBE1D3!important}
 #app .gto-shared-toolbar .gto-toolbar-popover :is(.gto-toolbar-action,button,a):hover{background:#E8F5EC!important}
 #app .gto-shared-toolbar .gto-toolbar-popover :is(.gto-toolbar-action,button,a) *{color:inherit!important}
+/* ---- Clima y tipo de cambio en la barra; Sistema OC oculto (18/11) ---- */
+#app .gto-maq-oculto{display:none!important}
+#app .gto-shared-toolbar .barra>.chip.gto-maq-chip{background:transparent!important;border:0!important;box-shadow:none!important;border-left:1px solid #FFFFFF40!important;border-radius:0!important;padding:0 4px 0 16px!important;min-height:44px;color:#fff}
+#app .gto-shared-toolbar .barra>.chip.gto-maq-chip .ico{background:transparent!important;border:2px solid #fff;color:#fff!important;width:32px;height:32px}
+#app .gto-shared-toolbar .barra>.chip.gto-maq-chip .ico svg{stroke:#fff}
+#app .gto-shared-toolbar .barra>.chip.gto-maq-chip :is(.v,.l,small){color:#fff!important}
+#app .gto-shared-toolbar .barra>.chip.gto-maq-chip .v{font-size:19px}
+#app .gto-shared-toolbar .barra>.chip.gto-maq-chip .l{font-size:11px;max-width:170px;opacity:.9}
 }
