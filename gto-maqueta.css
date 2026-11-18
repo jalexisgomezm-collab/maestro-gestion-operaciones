@@ -77,4 +77,30 @@
 #app .gto-shared-toolbar .barra>.chip.gto-maq-chip :is(.v,.l,small){color:#fff!important}
 #app .gto-shared-toolbar .barra>.chip.gto-maq-chip .v{font-size:19px}
 #app .gto-shared-toolbar .barra>.chip.gto-maq-chip .l{font-size:11px;max-width:170px;opacity:.9}
+/* ---- Bandeja de avisos del Maestro (misma que la Bitácora) ---- */
+#app .gto-shared-toolbar .barra :is(.gto-shared-bell,.gto-status-bell-only){display:none!important}
+.gto-bit-campana{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;background:transparent;border:0;color:#fff;cursor:pointer}
+.gto-bit-campana svg{width:24px!important;height:24px!important}
+.gto-bit-n{position:absolute;top:2px;right:0;min-width:19px;height:19px;padding:0 5px;border-radius:99px;background:#B4232A;color:#fff;font:900 11px/19px Nunito,sans-serif;text-align:center}
+.gto-bit-n:empty{display:none}
+.gto-bit-fondo{position:fixed;inset:0;z-index:9990;background:#053B1E45}
+.gto-bit-bandeja{position:fixed;z-index:9991;top:16px;right:16px;width:min(480px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;background:#fff;border-radius:16px;box-shadow:0 20px 60px #053B1E40;font-family:Nunito,'Segoe UI',sans-serif;color:#1A2420}
+.gto-bit-bandeja[hidden],.gto-bit-fondo[hidden]{display:none!important}
+.gto-bit-bandeja header{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;background:#06612E;color:#fff;z-index:1}
+.gto-bit-bandeja header h2{margin:0;font:900 19px/1.2 Nunito,sans-serif;color:#fff}
+.gto-bit-bandeja header button{background:#fff;color:#06612E;border:0;border-radius:8px;padding:8px 14px;font:800 13px Nunito,sans-serif;cursor:pointer}
+.gto-bit-lista{padding:6px 20px 20px}
+.gto-bit-lista h3{margin:18px 0 8px;font:900 12px/1.3 Nunito,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#636E68}
+.gto-bit-item{display:block;padding:11px 14px;margin-bottom:8px;border-radius:10px;background:#F6F7F7;border-left:3px solid #CFDCD3;color:#1A2420;text-decoration:none}
+a.gto-bit-item:hover{background:#E8F5EC}
+.gto-bit-item.nuevo{border-left-color:#0A8A43;background:#F2FAF5}
+.gto-bit-item.alerta{border-left-color:#B4232A;background:#FDECEC}
+.gto-bit-item small{display:block;font:800 11px/1.3 Nunito,sans-serif;color:#077A3A;margin-bottom:2px}
+.gto-bit-item.alerta small{color:#B4232A}
+.gto-bit-item strong{display:block;font:900 14px/1.35 Nunito,sans-serif}
+.gto-bit-item p{margin:3px 0 0;font:600 12.5px/1.4 Nunito,sans-serif;color:#3C4540}
+.gto-bit-vacio{margin:0 0 6px;font:600 13px Nunito,sans-serif;color:#636E68}
+.gto-bit-error{padding:10px 12px;border-radius:8px;background:#FFF1D6;color:#7D4300;font:700 13px Nunito,sans-serif}
+.gto-bit-leer{margin-top:12px;background:#E8F5EC;color:#06612E;border:1px solid #CBE1D3;border-radius:8px;padding:9px 14px;font:800 13px Nunito,sans-serif;cursor:pointer}
+
 }
