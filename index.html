@@ -29,6 +29,32 @@
 @media(max-width:460px){#app .grid-info{grid-template-columns:1fr}}
 }
 </style>
+<style>@media screen{
+#app.ops-shell:has(.ot-sheet) .gto-shared-toolbar{background:#054c2a;border-radius:12px;padding:10px 18px}
+#app.ops-shell:has(.ot-sheet) header.top{background:white;padding:6px}
+#app.ops-shell:has(.ot-sheet) .gto-toolbar-quick :is(button,a),#app.ops-shell:has(.ot-sheet) .gto-toolbar-menu>summary{background:#075932;color:white!important;border:1px solid #c3d9ca;border-radius:7px}
+#app.ops-shell .ops-workspace>.ot-sheet{max-width:none;box-sizing:border-box;margin:0;padding:16px clamp(14px,2vw,34px);background:white}
+#app .ot-sheet .back{font-size:12px;margin-bottom:5px}
+#app .ot-sheet .detail-head{margin:0 0 12px;align-items:center}
+#app .ot-sheet .detail-head h1{font-size:clamp(22px,2vw,32px);color:#12462c;line-height:1.12;margin:3px 0}
+#app .ot-block{background:white;border:1px solid #bccfc1;border-radius:12px;overflow:hidden;margin-bottom:12px}
+#app .ot-heading{margin:0;padding:8px 15px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #dae6dd;font-size:17px;color:#173f2a}
+#app .ot-sheet .chain{display:flex;flex-wrap:nowrap;align-items:stretch;overflow:auto;margin:0;padding:12px;gap:5px}
+#app .ot-sheet .chain .step{flex:1 0 95px;min-width:0;padding:9px;border:1px solid #cbdcd0;border-radius:8px;background:#f9fbfa;overflow-wrap:anywhere}
+#app .ot-sheet .chain .done{background:#eaf6ee;border-color:#87c19a}
+#app .ot-sheet .chain .arr{align-self:center}
+#app .ot-sheet .step b,#app .ot-sheet .grid-info .k{text-transform:none;font-size:13px;letter-spacing:0;color:#284a35}
+#app .ot-sheet .grid-info{margin:0;border:0;border-radius:0}
+#app .ot-sheet .grid-info>div{padding:9px 12px}
+#app .ot-sheet .grid-info .k{display:flex;align-items:center;gap:6px}
+#app .ot-sheet .grid-info .v{margin-left:24px}
+#app .ot-sheet .tabs{background:white;border:0;border-bottom:1px solid #c9dbcf;border-radius:0}
+#app .ot-sheet .tabs button.on{box-shadow:none;border-radius:0;background:white;border-bottom:3px solid #077a3a}
+#app .ot-sheet th{background:#06612e;color:white;text-transform:none;font-size:12px}
+#app .ot-sheet :is(td,th){padding:8px 10px}
+#app .ot-sym{display:inline-block;width:18px;height:18px;flex:none;vertical-align:middle;color:#077a3a}
+#app .step>.ot-sym{display:block;margin-bottom:5px}
+}</style>
 </head>
 <body>
 <div id="app"><div class="loading">Cargando…</div></div>
@@ -39,6 +65,10 @@
 <script defer src="/gto-operaciones.js?v=20261117"></script>
 <script defer src="/gto-tablero.js?v=20261117"></script>
 <script src="https://sistema-integrado-gto.vercel.app/gto-status.js?v=20261118-maestro" data-gto-target="#app &gt; header.top" data-gto-module="Maestro de Gestión" data-gto-activity="ot"></script>
+<script>(()=>{const icons={doc:'M5 3h9l5 5v13H5z M14 3v6h5 M8 12h8 M8 16h6',box:'M3 7l9-5 9 5-9 5z M3 7v10l9 5 9-5V7 M12 12v10',cart:'M2 4h3l3 12h11l3-9H6 M9 20h1 M17 20h1',money:'M3 6h18v12H3z M9 12a3 3 0 1 0 6 0 3 3 0 1 0-6 0',info:'M12 3a9 9 0 1 0 .01 0 M12 10v7 M12 7v1',user:'M12 3a4 4 0 1 0 .01 0 M4 21v-2a8 8 0 0 1 16 0v2'};
+function icon(key){const ns='http://www.w3.org/2000/svg',s=document.createElementNS(ns,'svg'),p=document.createElementNS(ns,'path');for(const [a,b] of Object.entries({class:'ot-sym',viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.7','aria-hidden':'true'}))s.setAttribute(a,b);p.setAttribute('d',icons[key]);s.append(p);return s}
+function decorate(){const main=document.querySelector('#app main'),chain=main?.querySelector(':scope > .chain'),grid=main?.querySelector(':scope > .grid-info');if(!chain||!grid||!main.querySelector('.detail-head'))return;main.classList.add('ot-sheet');for(const [node,label,key] of [[chain,'Flujo documental','box'],[grid,'Resumen de la OT','info']]){const wrap=document.createElement('section'),h=document.createElement('h2');wrap.className='ot-block';h.className='ot-heading';h.append(icon(key),label);node.before(wrap);wrap.append(h,node)}for(const step of chain.querySelectorAll('.step')){const t=step.querySelector('b')?.textContent||'';step.prepend(icon(/cobro|factura/i.test(t)?'money':/guía/i.test(t)?'box':/OC/.test(t)?'cart':'doc'))}for(const k of grid.querySelectorAll('.k'))k.prepend(icon(/responsable/i.test(k.textContent)?'user':/monto/i.test(k.textContent)?'money':'doc'))}
+new MutationObserver(decorate).observe(document.getElementById('app'),{childList:true,subtree:true});decorate()})();</script>
 </body>
 </html>
 
