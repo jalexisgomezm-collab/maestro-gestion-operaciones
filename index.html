@@ -10,6 +10,25 @@
 <link rel="stylesheet" href="https://sistema-integrado-gto.vercel.app/gto-login-v2.css?v=20261117">
 <link rel="stylesheet" href="/gto-operaciones.css?v=20261117">
 <link rel="stylesheet" href="/gto-tablero.css?v=20261117">
+<style>
+@media screen{
+#app.ops-shell header.top.gto-integrated-header:has(.gto-shared-toolbar){padding:0;gap:0}
+#app.ops-shell header.top:has(.gto-shared-toolbar .gto-toolbar-account)>.user,
+#app.ops-shell header.top:has(.gto-shared-toolbar .gto-toolbar-quick .gto-portal-access)>.ops-menu-link{display:none}
+#app .gto-shared-toolbar{justify-content:flex-start;gap:16px}
+#app .gto-toolbar-quick{margin-inline-end:auto}
+#app .gto-toolbar-quick :is(button,a){background:#fff;color:#06612e!important;border:1px solid #cbe1d3;border-radius:9px;padding:8px 12px}
+#app .ops-sidebar{background:#f7faf8;color:#203d2b;border-right:1px solid #d8e6dc}
+#app .ops-module strong,#app .ops-module small,#app .ops-nav-label,#app .ops-sidebar-foot{color:#365641}
+#app .ops-navigation a{color:#254a33!important}
+#app .ops-navigation a:is(:hover,.active){background:#dcefe2;color:#064925!important}
+#app.ops-shell .ops-workspace>main{background:#f6f8f7}
+#app .grid-info{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media(max-width:1200px){#app .grid-info{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){#app .grid-info{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:460px){#app .grid-info{grid-template-columns:1fr}}
+}
+</style>
 </head>
 <body>
 <div id="app"><div class="loading">Cargando…</div></div>
@@ -19,7 +38,7 @@
 <script type="module" src="/app.js?v=20261117"></script>
 <script defer src="/gto-operaciones.js?v=20261117"></script>
 <script defer src="/gto-tablero.js?v=20261117"></script>
-<script src="https://sistema-integrado-gto.vercel.app/gto-status.js" data-gto-target="#app &gt; header.top" data-gto-module="Maestro de Gestión" data-gto-activity="ot"></script>
+<script src="https://sistema-integrado-gto.vercel.app/gto-status.js?v=20261118-maestro" data-gto-target="#app &gt; header.top" data-gto-module="Maestro de Gestión" data-gto-activity="ot"></script>
 </body>
 </html>
 
