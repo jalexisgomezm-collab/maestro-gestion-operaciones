@@ -61,4 +61,12 @@
 #app .ot-sheet .tabs button svg{width:18px;height:18px}
 #app .ot-sheet .tabs button.on{color:#06612E!important;font-weight:900!important;border-bottom:3px solid #077A3A!important;background:transparent!important}
 #app .ot-sheet th{background:#06612E!important;color:#fff!important;font:800 13px Nunito,sans-serif!important;text-transform:none!important;letter-spacing:0!important}
+/* ---- Campana y menú Mi cuenta (18/11 ajuste) ---- */
+#app .gto-shared-toolbar .gto-shared-bell button.btn,#app .gto-shared-toolbar .gto-shared-bell button.btn svg{color:#fff!important;stroke:#fff!important}
+#app .gto-shared-toolbar .gto-shared-bell button.btn svg{width:24px!important;height:24px!important}
+#app .gto-shared-toolbar .gto-toolbar-popover{background:#fff!important;color:#1A2420!important;min-width:250px;max-width:min(300px,calc(100vw - 28px))}
+#app .gto-shared-toolbar .gto-toolbar-popover .gto-toolbar-account{color:#1A2420!important;overflow-wrap:anywhere;font-size:13px}
+#app .gto-shared-toolbar .gto-toolbar-popover :is(.gto-toolbar-action,button,a){background:#fff!important;color:#064925!important;border:1px solid #CBE1D3!important}
+#app .gto-shared-toolbar .gto-toolbar-popover :is(.gto-toolbar-action,button,a):hover{background:#E8F5EC!important}
+#app .gto-shared-toolbar .gto-toolbar-popover :is(.gto-toolbar-action,button,a) *{color:inherit!important}
 }
