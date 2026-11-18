@@ -55,6 +55,7 @@
 #app .ot-sym{display:inline-block;width:18px;height:18px;flex:none;vertical-align:middle;color:#077a3a}
 #app .step>.ot-sym{display:block;margin-bottom:5px}
 }</style>
+<link rel="stylesheet" href="/gto-maqueta.css?v=20261118">
 </head>
 <body>
 <div id="app"><div class="loading">Cargando…</div></div>
@@ -69,6 +70,7 @@
 function icon(key){const ns='http://www.w3.org/2000/svg',s=document.createElementNS(ns,'svg'),p=document.createElementNS(ns,'path');for(const [a,b] of Object.entries({class:'ot-sym',viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.7','aria-hidden':'true'}))s.setAttribute(a,b);p.setAttribute('d',icons[key]);s.append(p);return s}
 function decorate(){const main=document.querySelector('#app main'),chain=main?.querySelector(':scope > .chain'),grid=main?.querySelector(':scope > .grid-info');if(!chain||!grid||!main.querySelector('.detail-head'))return;main.classList.add('ot-sheet');for(const [node,label,key] of [[chain,'Flujo documental','box'],[grid,'Resumen de la OT','info']]){const wrap=document.createElement('section'),h=document.createElement('h2');wrap.className='ot-block';h.className='ot-heading';h.append(icon(key),label);node.before(wrap);wrap.append(h,node)}for(const step of chain.querySelectorAll('.step')){const t=step.querySelector('b')?.textContent||'';step.prepend(icon(/cobro|factura/i.test(t)?'money':/guía/i.test(t)?'box':/OC/.test(t)?'cart':'doc'))}for(const k of grid.querySelectorAll('.k'))k.prepend(icon(/responsable/i.test(k.textContent)?'user':/monto/i.test(k.textContent)?'money':'doc'))}
 new MutationObserver(decorate).observe(document.getElementById('app'),{childList:true,subtree:true});decorate()})();</script>
+<script defer src="/gto-maqueta.js?v=20261118"></script>
 </body>
 </html>
 

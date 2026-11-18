@@ -1,0 +1,64 @@
+/* Maqueta Maestro de Gestión (18/11/2026). Solo presentación: no cambia datos, consultas ni acciones. */
+@media screen{
+/* ---- Barra superior verde, como la maqueta ---- */
+#app.ops-shell header.top,#app.ops-shell:has(.ot-sheet) header.top{background:#06612E!important;padding:0!important;height:auto;min-height:76px;box-shadow:0 4px 16px #053B1E1f}
+#app.ops-shell .gto-shared-toolbar,#app.ops-shell:has(.ot-sheet) .gto-shared-toolbar{background:#06612E!important;border:0!important;border-radius:0!important;padding:12px 26px!important;color:#fff;gap:14px!important;width:100%}
+#app.ops-shell .gto-integrated-host{width:100%}
+#app .gto-shared-toolbar .gto-toolbar-brand{gap:20px}
+#app .gto-shared-toolbar .gto-toolbar-brand img{width:clamp(120px,10vw,168px)!important;background:none!important;padding:0!important}
+#app .gto-shared-toolbar .gto-toolbar-brand span{border-left:1px solid #FFFFFF40!important;padding-left:20px!important;color:#fff!important;display:flex;align-items:center;gap:12px;font:900 21px/1 Nunito,'Segoe UI',sans-serif!important;white-space:nowrap}
+#app .gto-shared-toolbar .gto-toolbar-brand span svg{width:28px;height:28px;flex:none}
+#app .gto-shared-toolbar .gto-toolbar-quick{padding-left:18px;border-left:1px solid #FFFFFF40;gap:10px}
+#app .gto-shared-toolbar .gto-toolbar-quick :is(button,a),#app.ops-shell:has(.ot-sheet) .gto-toolbar-quick :is(button,a),
+#app .gto-shared-toolbar .gto-toolbar-menu>summary,#app.ops-shell:has(.ot-sheet) .gto-toolbar-menu>summary{background:transparent!important;color:#fff!important;border:1.5px solid #FFFFFFB0!important;border-radius:10px!important;padding:7px 14px!important;gap:8px;font:800 14px/1.2 Nunito,'Segoe UI',sans-serif!important}
+#app .gto-shared-toolbar .gto-toolbar-quick :is(button,a):hover,#app .gto-shared-toolbar .gto-toolbar-menu>summary:hover{background:#FFFFFF1f!important}
+#app .gto-shared-toolbar .gto-maq-ic{width:17px;height:17px;flex:none}
+#app .gto-shared-toolbar .chip.reloj{background:transparent!important;border:0!important;box-shadow:none!important;color:#fff;padding:0 4px!important;border-left:1px solid #FFFFFF40!important;border-radius:0!important;padding-left:16px!important}
+#app .gto-shared-toolbar .chip.reloj .ico{background:transparent!important;border:2px solid #fff;color:#fff}
+#app .gto-shared-toolbar .chip.reloj :is(.v,.l,small){color:#fff!important}
+#app .gto-shared-toolbar .chip.reloj .sal{display:none}
+#app .gto-shared-toolbar .barra .gto-shared-bell button.btn{background:transparent!important;color:#fff!important;border:0!important}
+#app .gto-shared-toolbar .gto-toolbar-popover{color:#1A2420}
+/* ---- Fondo y menú lateral ---- */
+#app.ops-shell .ops-workspace>main,#app.ops-shell .ops-workspace>.ot-sheet{background:#F6F7F7!important}
+#app .ops-sidebar{background:#fff!important;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='220' fill='none' stroke='%23B9DFC7' stroke-width='1.5'%3E%3Cpath d='M0 200h60l40-40h60M20 220v-40l30-30h80l30-30M0 170h30l50-50h40'/%3E%3Ccircle cx='160' cy='160' r='4'/%3E%3Ccircle cx='190' cy='120' r='4'/%3E%3Ccircle cx='120' cy='120' r='4'/%3E%3C/svg%3E")!important;background-repeat:no-repeat!important;background-position:left bottom!important}
+#app .ops-module small{display:none}
+#app .ops-module strong{font-size:19px!important;color:#06612E!important}
+#app .ops-nav-label{display:none}
+#app.ops-shell .ops-navigation a{font-size:14px!important;color:#1A2420!important}
+#app.ops-shell .ops-navigation a svg{color:#077A3A}
+#app.ops-shell .ops-navigation a.active{background:#E8F5EC!important;color:#06612E!important}
+/* ---- Encabezado de la OT ---- */
+#app .ot-sheet{background:#F6F7F7!important}
+#app .ot-sheet .detail-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px}
+#app .ot-sheet .detail-head>div:first-of-type{display:grid;grid-template-columns:auto 1fr;column-gap:16px;align-items:center}
+#app .gto-maq-cab{width:58px;height:58px;border-radius:14px;background:#E8F5EC;display:grid;place-items:center;color:#06612E;grid-row:span 3}
+#app .gto-maq-cab svg{width:30px;height:30px}
+#app .ot-sheet .detail-head h1{text-transform:none!important;letter-spacing:-.3px;font-size:clamp(22px,2vw,30px)!important;color:#12462C!important;font-weight:900}
+#app .gto-maq-codigo{display:flex;align-items:center;gap:8px;font:700 14px Nunito,sans-serif;color:#1A2420;margin:2px 0 4px}
+#app .gto-maq-codigo .ot-tag{background:#E8F5EC!important;color:#06612E!important;border:0!important;border-radius:999px!important;padding:3px 12px!important;font:800 13px 'Nunito',sans-serif!important}
+#app .ot-sheet .detail-head .sub,#app .ot-sheet .detail-head>div:first-of-type>.row{grid-column:2}
+#app .ot-sheet .detail-head>.row{gap:10px}
+#app .ot-sheet .detail-head>.row button{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid #CFDCD3;border-radius:10px;color:#1A2420;font:800 14px Nunito,sans-serif;padding:9px 16px;box-shadow:0 1px 3px #0000000a}
+#app .ot-sheet .detail-head>.row button:hover{background:#F2FAF5;border-color:#0A8A43}
+#app .ot-sheet .detail-head>.row button svg{width:18px;height:18px;color:#077A3A}
+#app .ot-sheet .detail-head>.row button.danger{background:#FDECEC;border-color:#F3B6B6;color:#B4232A}
+#app .ot-sheet .detail-head>.row button.danger svg{color:#B4232A}
+/* ---- Tarjetas, flujo y resumen ---- */
+#app .ot-block{border:1px solid #E1E8E4!important;border-radius:14px!important;box-shadow:0 4px 16px #1E322810;background:#fff}
+#app .ot-heading{border-bottom:0!important;padding:14px 18px 6px!important;font-size:18px!important;font-weight:900}
+#app .ot-sheet .chain{padding:10px 16px 16px!important;gap:8px!important}
+#app .ot-sheet .chain .step{position:relative;background:#fff!important;border:1px solid #E1E8E4!important;border-radius:12px!important;padding:12px 14px!important;box-shadow:0 2px 6px #0000000a}
+#app .ot-sheet .chain .step b{font-size:14px!important;color:#1A2420!important;font-weight:900!important}
+#app .ot-sheet .chain .step.done{background:#F2FAF5!important;border-color:#BFE1CB!important}
+#app .ot-sheet .chain .step.done::after{content:"";position:absolute;top:9px;right:9px;width:20px;height:20px;border-radius:50%;background:#0A8A43 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12l4 4 8-8'/%3E%3C/svg%3E") center/13px no-repeat}
+#app .ot-sheet .chain .arr{color:#1A2420;font-weight:900}
+#app .ot-sheet .grid-info .k{color:#3C4540!important;font-weight:700!important}
+#app .ot-sheet .grid-info .v{color:#1A2420;font-weight:800}
+/* ---- Pestañas y tablas ---- */
+#app .ot-sheet .tabs{background:transparent!important;border-bottom:1px solid #DCE5E0!important;gap:6px}
+#app .ot-sheet .tabs button{display:inline-flex;align-items:center;gap:8px;font:700 14px Nunito,sans-serif!important;color:#3C4540!important;padding:12px 16px!important}
+#app .ot-sheet .tabs button svg{width:18px;height:18px}
+#app .ot-sheet .tabs button.on{color:#06612E!important;font-weight:900!important;border-bottom:3px solid #077A3A!important;background:transparent!important}
+#app .ot-sheet th{background:#06612E!important;color:#fff!important;font:800 13px Nunito,sans-serif!important;text-transform:none!important;letter-spacing:0!important}
+}
